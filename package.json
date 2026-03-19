@@ -5,7 +5,6 @@
 	"version": "0.1.0",
 	"publisher": "termicode",
 	"license": "MIT",
-	"icon": "media/icon.png",
 	"engines": {
 		"vscode": "^1.90.0"
 	},
@@ -30,10 +29,10 @@
 	"main": "./dist/extension.js",
 	"contributes": {
 		"viewsContainers": {
-			"auxiliarybar": [
+			"secondarySidebar": [
 				{
 					"id": "termicode-claude",
-					"title": "Claude",
+					"title": "Termicode",
 					"icon": "media/claude-icon.svg"
 				}
 			]
@@ -43,7 +42,7 @@
 				{
 					"type": "webview",
 					"id": "termicode.terminal",
-					"name": "Claude Code",
+					"name": "Termicode – Claude Code",
 					"retainContextWhenHidden": true
 				}
 			]

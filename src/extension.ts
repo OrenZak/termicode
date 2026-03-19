@@ -82,10 +82,10 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 
 		this.write(`\x1b[90mStarting Claude Code in ${cwd}...\x1b[0m\r\n`);
 
-		// Use `script` on macOS/Linux to allocate a pty so claude gets full terminal behaviour
+		// Spawn claude directly; `script` is not available in all environments
 		const [cmd, args] = process.platform === 'win32'
 			? [claudePath, []]
-			: ['script', ['-q', '/dev/null', claudePath]];
+			: [claudePath, []];
 
 		this.pty = cp.spawn(cmd, args, {
 			cwd,
