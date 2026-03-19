@@ -1,0 +1,104 @@
+{
+	"name": "termicode",
+	"displayName": "Termicode – Claude Code Panel",
+	"description": "Run Claude Code CLI as a first-class terminal panel in the secondary sidebar",
+	"version": "0.1.0",
+	"publisher": "termicode",
+	"license": "MIT",
+	"icon": "media/icon.png",
+	"engines": {
+		"vscode": "^1.90.0"
+	},
+	"categories": [
+		"AI",
+		"Other"
+	],
+	"keywords": [
+		"claude",
+		"claude code",
+		"anthropic",
+		"ai",
+		"terminal"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/OrenZak/termicode.git"
+	},
+	"activationEvents": [
+		"onStartupFinished"
+	],
+	"main": "./dist/extension.js",
+	"contributes": {
+		"viewsContainers": {
+			"auxiliarybar": [
+				{
+					"id": "termicode-claude",
+					"title": "Claude",
+					"icon": "media/claude-icon.svg"
+				}
+			]
+		},
+		"views": {
+			"termicode-claude": [
+				{
+					"type": "webview",
+					"id": "termicode.terminal",
+					"name": "Claude Code",
+					"retainContextWhenHidden": true
+				}
+			]
+		},
+		"commands": [
+			{
+				"command": "termicode.open",
+				"title": "Open Claude Panel",
+				"category": "Claude",
+				"icon": "media/claude-icon.svg"
+			},
+			{
+				"command": "termicode.newSession",
+				"title": "New Session",
+				"category": "Claude",
+				"icon": "$(add)"
+			}
+		],
+		"menus": {
+			"view/title": [
+				{
+					"command": "termicode.newSession",
+					"when": "view == termicode.terminal",
+					"group": "navigation"
+				}
+			]
+		},
+		"keybindings": [
+			{
+				"command": "termicode.open",
+				"key": "ctrl+alt+c",
+				"mac": "cmd+alt+c"
+			}
+		],
+		"configuration": {
+			"title": "Termicode",
+			"properties": {
+				"termicode.claudePath": {
+					"type": "string",
+					"default": "claude",
+					"description": "Path to the Claude Code CLI executable"
+				}
+			}
+		}
+	},
+	"scripts": {
+		"build": "node esbuild.mjs",
+		"watch": "node esbuild.mjs --watch",
+		"package": "npm run build && vsce package",
+		"vscode:prepublish": "npm run build"
+	},
+	"devDependencies": {
+		"@types/node": "^22.0.0",
+		"@types/vscode": "^1.90.0",
+		"esbuild": "^0.27.0",
+		"@vscode/vsce": "^3.0.0"
+	}
+}
