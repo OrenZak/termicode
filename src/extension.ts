@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
+import * as cp from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
+import * as fs from 'fs';
 
 export function activate(context: vscode.ExtensionContext) {
 	const provider = new ClaudeTerminalViewProvider(context);
@@ -21,14 +23,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('termicode.newSession', () => {
-			provider.newSession();
-		})
-	);
-
-	// When a terminal closes, notify the webview
-	context.subscriptions.push(
-		vscode.window.onDidCloseTerminal(terminal => {
-			provider.onTerminalClosed(terminal);
+			provider.restartSession();
 		})
 	);
 }
@@ -40,7 +35,7 @@ export function deactivate() { }
 class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 
 	private view?: vscode.WebviewView;
-	private terminal?: vscode.Terminal;
+	private bridge?: cp.ChildProcess;
 
 	constructor(private readonly context: vscode.ExtensionContext) { }
 
@@ -58,63 +53,84 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 
 		webviewView.webview.html = this.getHtml(webviewView.webview);
 
-		webviewView.webview.onDidReceiveMessage((msg: { type: string }) => {
-			if (msg.type === 'newSession') {
-				this.newSession();
-			} else if (msg.type === 'focusTerminal') {
-				this.terminal?.show(false);
+		webviewView.webview.onDidReceiveMessage((msg: { type: string; data?: string; cols?: number; rows?: number }) => {
+			switch (msg.type) {
+				case 'ready':
+					this.startSession();
+					break;
+				case 'input':
+					if (msg.data) {
+						this.bridge?.stdin?.write(msg.data);
+					}
+					break;
+				case 'resize':
+					if (msg.cols && msg.rows) {
+						// Send xterm resize escape: CSI 8 ; rows ; cols t
+						this.bridge?.stdin?.write(`\x1b[8;${msg.rows};${msg.cols}t`);
+					}
+					break;
 			}
+		});
+
+		webviewView.onDidDispose(() => {
+			this.bridge?.kill();
+			this.bridge = undefined;
 		});
 	}
 
-	newSession() {
-		// Kill existing session if any
-		if (this.terminal) {
-			this.terminal.dispose();
-			this.terminal = undefined;
+	restartSession() {
+		this.bridge?.kill();
+		this.bridge = undefined;
+		this.view?.webview.postMessage({ type: 'reset' });
+		setTimeout(() => this.startSession(), 200);
+	}
+
+	private startSession() {
+		if (this.bridge) {
+			return;
 		}
 
 		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
 		const claudePath = this.resolveClaudePath();
+		const bridgePath = path.join(this.context.extensionPath, 'media', 'pty_bridge.py');
 
-		this.terminal = vscode.window.createTerminal({
-			name: 'Claude Code',
-			shellPath: claudePath,
+		this.write(`\x1b[90mStarting Claude Code in ${cwd}...\x1b[0m\r\n`);
+
+		this.bridge = cp.spawn('python3', [bridgePath, claudePath, '120', '40'], {
 			cwd,
-			env: {
-				TERM: 'xterm-256color',
-				COLORTERM: 'truecolor',
-			},
-			// Open as an editor tab — user can drag to secondary sidebar
-			location: vscode.TerminalLocation.Editor,
-			isTransient: false,
+			env: { ...process.env },
 		});
 
-		this.terminal.show(false); // false = don't steal focus
-		this.view?.webview.postMessage({ type: 'sessionStarted', cwd });
-	}
+		this.bridge.stdout?.on('data', (chunk: Buffer) => {
+			this.write(chunk.toString('utf8'));
+		});
 
-	onTerminalClosed(terminal: vscode.Terminal) {
-		if (terminal === this.terminal) {
-			this.terminal = undefined;
-			this.view?.webview.postMessage({ type: 'sessionEnded' });
-		}
+		this.bridge.stderr?.on('data', (chunk: Buffer) => {
+			this.write(chunk.toString('utf8'));
+		});
+
+		this.bridge.on('error', (err) => {
+			this.write(`\r\n\x1b[31m[Bridge error: ${err.message}]\x1b[0m\r\n`);
+			this.bridge = undefined;
+		});
+
+		this.bridge.on('exit', (code) => {
+			this.bridge = undefined;
+			this.write(`\r\n\x1b[90m[Session ended (code ${code}). Press + to start a new session.]\x1b[0m\r\n`);
+		});
 	}
 
 	private resolveClaudePath(): string {
 		const configured = vscode.workspace.getConfiguration('termicode').get<string>('claudePath', '');
-		if (configured) { return configured; }
-
-		// Search common install locations
+		if (configured) {
+			return configured;
+		}
 		const candidates = [
 			path.join(os.homedir(), '.local', 'bin', 'claude'),
 			path.join(os.homedir(), '.npm-global', 'bin', 'claude'),
 			'/usr/local/bin/claude',
 			'/opt/homebrew/bin/claude',
-			'claude', // fallback to PATH lookup
 		];
-
-		const fs = require('fs') as typeof import('fs');
 		for (const p of candidates) {
 			try {
 				fs.accessSync(p, fs.constants.X_OK);
@@ -122,6 +138,10 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 			} catch { }
 		}
 		return 'claude';
+	}
+
+	private write(data: string) {
+		this.view?.webview.postMessage({ type: 'write', data });
 	}
 
 	private getHtml(webview: vscode.Webview): string {
@@ -134,119 +154,57 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 <html lang="en">
 <head>
 	<meta charset="UTF-8">
-	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource};">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${webview.cspSource} 'unsafe-inline';">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<link rel="stylesheet" href="${uri('xterm.css')}">
 	<style>
-		*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-		body {
-			font-family: var(--vscode-font-family);
-			font-size: var(--vscode-font-size);
-			color: var(--vscode-foreground);
-			background: var(--vscode-sideBar-background);
-			height: 100vh;
-			display: flex;
-			flex-direction: column;
-			align-items: center;
-			justify-content: center;
-			gap: 16px;
-			padding: 24px;
-			text-align: center;
-		}
-
-		.logo {
-			width: 48px;
-			height: 48px;
-			border-radius: 10px;
-			background: #CC785C;
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			font-size: 28px;
-			font-weight: bold;
-			color: white;
-			font-family: monospace;
-		}
-
-		h2 {
-			font-size: 15px;
-			font-weight: 600;
-			color: var(--vscode-foreground);
-		}
-
-		p {
-			font-size: 12px;
-			color: var(--vscode-descriptionForeground);
-			line-height: 1.5;
-		}
-
-		button {
-			background: var(--vscode-button-background);
-			color: var(--vscode-button-foreground);
-			border: none;
-			border-radius: 4px;
-			padding: 7px 14px;
-			font-size: 13px;
-			cursor: pointer;
-			width: 100%;
-			max-width: 200px;
-		}
-
-		button:hover { background: var(--vscode-button-hoverBackground); }
-
-		button.secondary {
-			background: var(--vscode-button-secondaryBackground, transparent);
-			color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
-			border: 1px solid var(--vscode-button-border, var(--vscode-widget-border));
-		}
-
-		.status {
-			font-size: 11px;
-			color: var(--vscode-descriptionForeground);
-		}
-
-		.running { color: var(--vscode-testing-iconPassed, #4caf50); }
-
-		#session-controls { display: none; flex-direction: column; gap: 8px; align-items: center; width: 100%; }
-		#start-controls { display: flex; flex-direction: column; gap: 8px; align-items: center; width: 100%; }
+		html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: var(--vscode-terminal-background, #1e1e1e); }
+		#terminal { width: 100%; height: 100%; }
 	</style>
 </head>
 <body>
-	<div class="logo">C</div>
-	<h2>Claude Code</h2>
-
-	<div id="start-controls">
-		<p>Opens a full Claude Code terminal as an editor tab. You can drag it to the secondary sidebar.</p>
-		<button id="btn-start">Start Claude Session</button>
-	</div>
-
-	<div id="session-controls">
-		<p class="status running">● Session running</p>
-		<p id="session-cwd" class="status"></p>
-		<button id="btn-focus" class="secondary">Focus Terminal</button>
-		<button id="btn-new">New Session</button>
-	</div>
-
+	<div id="terminal"></div>
+	<script nonce="${nonce}" src="${uri('xterm.js')}"></script>
+	<script nonce="${nonce}" src="${uri('xterm-addon-fit.js')}"></script>
 	<script nonce="${nonce}">
 		const vscode = acquireVsCodeApi();
-		const startControls = document.getElementById('start-controls');
-		const sessionControls = document.getElementById('session-controls');
-		const cwdLabel = document.getElementById('session-cwd');
 
-		document.getElementById('btn-start').onclick = () => vscode.postMessage({ type: 'newSession' });
-		document.getElementById('btn-focus').onclick = () => vscode.postMessage({ type: 'focusTerminal' });
-		document.getElementById('btn-new').onclick = () => vscode.postMessage({ type: 'newSession' });
-
-		window.addEventListener('message', ({ data }) => {
-			if (data.type === 'sessionStarted') {
-				startControls.style.display = 'none';
-				sessionControls.style.display = 'flex';
-				cwdLabel.textContent = data.cwd || '';
-			} else if (data.type === 'sessionEnded') {
-				startControls.style.display = 'flex';
-				sessionControls.style.display = 'none';
-			}
+		const term = new Terminal({
+			cursorBlink: true,
+			fontSize: 13,
+			fontFamily: 'var(--vscode-editor-font-family, "Cascadia Code", Menlo, monospace)',
+			theme: {
+				background:   getComputedStyle(document.body).getPropertyValue('--vscode-terminal-background').trim()       || '#1e1e1e',
+				foreground:   getComputedStyle(document.body).getPropertyValue('--vscode-terminal-foreground').trim()       || '#d4d4d4',
+				cursor:       getComputedStyle(document.body).getPropertyValue('--vscode-terminalCursor-foreground').trim() || '#aeafad',
+				black: '#1e1e1e', red: '#f44747', green: '#6a9955', yellow: '#d7ba7d',
+				blue: '#569cd6', magenta: '#c586c0', cyan: '#9cdcfe', white: '#d4d4d4',
+				brightBlack: '#808080', brightRed: '#f44747', brightGreen: '#b5cea8',
+				brightYellow: '#dcdcaa', brightBlue: '#9cdcfe', brightMagenta: '#c586c0',
+				brightCyan: '#4ec9b0', brightWhite: '#ffffff',
+			},
+			convertEol: true,
+			scrollback: 5000,
 		});
+
+		const fitAddon = new FitAddon.FitAddon();
+		term.loadAddon(fitAddon);
+		term.open(document.getElementById('terminal'));
+		fitAddon.fit();
+
+		term.onData(data => vscode.postMessage({ type: 'input', data }));
+
+		new ResizeObserver(() => {
+			fitAddon.fit();
+			vscode.postMessage({ type: 'resize', cols: term.cols, rows: term.rows });
+		}).observe(document.getElementById('terminal'));
+
+		window.addEventListener('message', ({ data: msg }) => {
+			if (msg.type === 'write') { term.write(msg.data); }
+			else if (msg.type === 'reset') { term.reset(); }
+		});
+
+		vscode.postMessage({ type: 'ready' });
 	</script>
 </body>
 </html>`;
