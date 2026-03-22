@@ -2,7 +2,7 @@
 	"permissions": {
 		"allow": [
 			"Bash(*)",
-			"Read(/tmp/termicode-screenshots/*)"
+			"Read(/tmp/termicode-screenshots/**)"
 		]
 	}
 }

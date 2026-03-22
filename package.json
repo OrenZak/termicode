@@ -96,6 +96,11 @@
 				"title": "Copy Last Response",
 				"category": "Claude",
 				"icon": "$(copy)"
+			},
+			{
+				"command": "termicode.cmdL",
+				"title": "Add Selection / Toggle Panel",
+				"category": "Claude"
 			}
 		],
 		"menus": {
@@ -200,6 +205,11 @@
 				"command": "termicode.history",
 				"key": "ctrl+alt+h",
 				"mac": "cmd+alt+h"
+			},
+			{
+				"command": "termicode.cmdL",
+				"key": "ctrl+l",
+				"mac": "cmd+l"
 			}
 		],
 		"configuration": {

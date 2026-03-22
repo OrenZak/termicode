@@ -99,6 +99,25 @@ export function activate(context: vscode.ExtensionContext) {
 	reg('termicode.compactContext', () => provider?.injectText('/compact\r'));
 	reg('termicode.history',        () => provider?.injectText('/resume\r'));
 	reg('termicode.copyLastResponse', () => provider?.copyLastResponse());
+
+	// Cmd+L: attach selection if any, then focus panel; or toggle panel if nothing selected
+	reg('termicode.cmdL', () => {
+		const editor = vscode.window.activeTextEditor;
+		if (editor && !editor.selection.isEmpty) {
+			// Has selection → inject code block + open panel (same as addSelection)
+			const sel = editor.selection;
+			const text = editor.document.getText(sel);
+			const rel = provider?.getRelativePath() ?? editor.document.uri.fsPath;
+			const lang = editor.document.languageId;
+			const startLine = sel.start.line + 1;
+			const endLine = sel.end.line + 1;
+			const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
+			const block = `\`\`\`${lang}\n# ${rel}:${lineRange}\n${text}\n\`\`\`\n`;
+			provider?.injectText(block);
+		}
+		// Always reveal the Termicode panel
+		vscode.commands.executeCommand('workbench.view.extension.termicode-claude');
+	});
 }
 
 export function deactivate() {
