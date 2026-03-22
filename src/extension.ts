@@ -100,11 +100,11 @@ export function activate(context: vscode.ExtensionContext) {
 	reg('termicode.history',        () => provider?.injectText('/resume\r'));
 	reg('termicode.copyLastResponse', () => provider?.copyLastResponse());
 
-	// Cmd+L: attach selection if any, then focus panel; or toggle panel if nothing selected
+	// Cmd+L: attach selection + show panel, or toggle the secondary sidebar
 	reg('termicode.cmdL', () => {
 		const editor = vscode.window.activeTextEditor;
 		if (editor && !editor.selection.isEmpty) {
-			// Has selection → inject code block + open panel (same as addSelection)
+			// Has selection → inject code block then make sure panel is visible
 			const sel = editor.selection;
 			const text = editor.document.getText(sel);
 			const rel = provider?.getRelativePath() ?? editor.document.uri.fsPath;
@@ -114,9 +114,11 @@ export function activate(context: vscode.ExtensionContext) {
 			const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
 			const block = `\`\`\`${lang}\n# ${rel}:${lineRange}\n${text}\n\`\`\`\n`;
 			provider?.injectText(block);
+			vscode.commands.executeCommand('workbench.view.extension.termicode-claude');
+		} else {
+			// No selection → toggle the secondary sidebar (show/hide)
+			vscode.commands.executeCommand('workbench.action.toggleAuxiliaryBar');
 		}
-		// Always reveal the Termicode panel
-		vscode.commands.executeCommand('workbench.view.extension.termicode-claude');
 	});
 }
 
