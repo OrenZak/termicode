@@ -2,30 +2,19 @@
 	"name": "termicode",
 	"displayName": "Termicode – Claude Code Panel",
 	"description": "Run Claude Code CLI as a first-class terminal panel in the secondary sidebar",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"publisher": "termicode",
 	"license": "MIT",
 	"engines": {
 		"vscode": "^1.90.0"
 	},
-	"categories": [
-		"AI",
-		"Other"
-	],
-	"keywords": [
-		"claude",
-		"claude code",
-		"anthropic",
-		"ai",
-		"terminal"
-	],
+	"categories": ["AI", "Other"],
+	"keywords": ["claude", "claude code", "anthropic", "ai", "terminal"],
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/OrenZak/termicode.git"
 	},
-	"activationEvents": [
-		"onStartupFinished"
-	],
+	"activationEvents": ["onStartupFinished"],
 	"main": "./dist/extension.js",
 	"contributes": {
 		"viewsContainers": {
@@ -50,7 +39,7 @@
 		"commands": [
 			{
 				"command": "termicode.open",
-				"title": "Open Claude Panel",
+				"title": "Open Termicode Panel",
 				"category": "Claude",
 				"icon": "media/claude-icon.svg"
 			},
@@ -59,6 +48,54 @@
 				"title": "New Session",
 				"category": "Claude",
 				"icon": "$(add)"
+			},
+			{
+				"command": "termicode.addFile",
+				"title": "Add Current File to Claude",
+				"category": "Claude",
+				"icon": "$(file-add)"
+			},
+			{
+				"command": "termicode.addSelection",
+				"title": "Add Selected Code to Claude",
+				"category": "Claude",
+				"icon": "$(selection)"
+			},
+			{
+				"command": "termicode.askClaude",
+				"title": "Ask Claude...",
+				"category": "Claude",
+				"icon": "$(comment)"
+			},
+			{
+				"command": "termicode.addImage",
+				"title": "Add Image to Claude",
+				"category": "Claude",
+				"icon": "$(file-media)"
+			},
+			{
+				"command": "termicode.clearContext",
+				"title": "Clear Context (/clear)",
+				"category": "Claude",
+				"icon": "$(clear-all)"
+			},
+			{
+				"command": "termicode.compactContext",
+				"title": "Compact Context (/compact)",
+				"category": "Claude",
+				"icon": "$(fold)"
+			},
+			{
+				"command": "termicode.history",
+				"title": "Session History (/resume)",
+				"category": "Claude",
+				"icon": "$(history)"
+			},
+			{
+				"command": "termicode.copyLastResponse",
+				"title": "Copy Last Response",
+				"category": "Claude",
+				"icon": "$(copy)"
 			}
 		],
 		"menus": {
@@ -66,7 +103,60 @@
 				{
 					"command": "termicode.newSession",
 					"when": "view == termicode.terminal",
-					"group": "navigation"
+					"group": "navigation@1"
+				},
+				{
+					"command": "termicode.addFile",
+					"when": "view == termicode.terminal",
+					"group": "navigation@2"
+				},
+				{
+					"command": "termicode.addImage",
+					"when": "view == termicode.terminal",
+					"group": "navigation@3"
+				},
+				{
+					"command": "termicode.copyLastResponse",
+					"when": "view == termicode.terminal",
+					"group": "navigation@4"
+				},
+				{
+					"command": "termicode.history",
+					"when": "view == termicode.terminal",
+					"group": "navigation@5"
+				},
+				{
+					"command": "termicode.clearContext",
+					"when": "view == termicode.terminal",
+					"group": "navigation@6"
+				},
+				{
+					"command": "termicode.compactContext",
+					"when": "view == termicode.terminal",
+					"group": "navigation@7"
+				}
+			],
+			"editor/context": [
+				{
+					"command": "termicode.askClaude",
+					"when": "editorHasSelection",
+					"group": "claude@1"
+				},
+				{
+					"command": "termicode.addSelection",
+					"when": "editorHasSelection",
+					"group": "claude@2"
+				},
+				{
+					"command": "termicode.addFile",
+					"group": "claude@3"
+				}
+			],
+			"explorer/context": [
+				{
+					"command": "termicode.addFile",
+					"when": "!explorerResourceIsFolder",
+					"group": "claude@1"
 				}
 			]
 		},
@@ -75,6 +165,41 @@
 				"command": "termicode.open",
 				"key": "ctrl+alt+c",
 				"mac": "cmd+alt+c"
+			},
+			{
+				"command": "termicode.newSession",
+				"key": "ctrl+alt+n",
+				"mac": "cmd+alt+n"
+			},
+			{
+				"command": "termicode.addFile",
+				"key": "ctrl+shift+a",
+				"mac": "cmd+shift+a"
+			},
+			{
+				"command": "termicode.addSelection",
+				"key": "ctrl+shift+;",
+				"mac": "cmd+shift+;"
+			},
+			{
+				"command": "termicode.clearContext",
+				"key": "ctrl+alt+x",
+				"mac": "cmd+alt+x"
+			},
+			{
+				"command": "termicode.compactContext",
+				"key": "ctrl+alt+m",
+				"mac": "cmd+alt+m"
+			},
+			{
+				"command": "termicode.addImage",
+				"key": "ctrl+alt+i",
+				"mac": "cmd+alt+i"
+			},
+			{
+				"command": "termicode.history",
+				"key": "ctrl+alt+h",
+				"mac": "cmd+alt+h"
 			}
 		],
 		"configuration": {
@@ -82,8 +207,8 @@
 			"properties": {
 				"termicode.claudePath": {
 					"type": "string",
-					"default": "claude",
-					"description": "Path to the Claude Code CLI executable"
+					"default": "",
+					"description": "Path to the Claude Code CLI executable (leave empty to auto-detect)"
 				}
 			}
 		}
