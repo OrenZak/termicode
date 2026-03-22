@@ -210,6 +210,11 @@
 				"command": "termicode.cmdL",
 				"key": "ctrl+l",
 				"mac": "cmd+l"
+			},
+			{
+				"command": "termicode.cmdL",
+				"key": "ctrl+escape",
+				"mac": "cmd+escape"
 			}
 		],
 		"configuration": {
