@@ -4,7 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 
-// Module-level provider reference so activate() can wire commands into it
 let provider: ClaudeTerminalViewProvider | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
@@ -24,9 +23,8 @@ export function activate(context: vscode.ExtensionContext) {
 	reg('termicode.open', () =>
 		vscode.commands.executeCommand('workbench.view.extension.termicode-claude'));
 
-	reg('termicode.newSession', () => provider?.restartSession());
+	reg('termicode.newSession', () => provider?.newSession());
 
-	// addFile: accepts an optional fileUri (from explorer context menu) or uses active editor
 	reg('termicode.addFile', (fileUri?: vscode.Uri) => {
 		const rel = provider?.getRelativePath(fileUri);
 		if (rel) {
@@ -58,15 +56,11 @@ export function activate(context: vscode.ExtensionContext) {
 	reg('termicode.askClaude', async () => {
 		const editor = vscode.window.activeTextEditor;
 		const hasSelection = editor && !editor.selection.isEmpty;
-
 		const question = await vscode.window.showInputBox({
-			prompt: hasSelection
-				? 'Ask Claude about the selected code'
-				: 'Ask Claude',
+			prompt: hasSelection ? 'Ask Claude about the selected code' : 'Ask Claude',
 			placeHolder: 'What does this do? How can I improve it?',
 		});
 		if (!question) { return; }
-
 		let payload = '';
 		if (hasSelection && editor) {
 			const text = editor.document.getText(editor.selection);
@@ -83,9 +77,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	reg('termicode.addImage', async () => {
 		const uris = await vscode.window.showOpenDialog({
-			canSelectFiles: true,
-			canSelectFolders: false,
-			canSelectMany: false,
+			canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
 			filters: { 'Images': ['png', 'jpg', 'jpeg', 'gif', 'webp'] },
 			title: 'Select image to add to Claude',
 		});
@@ -95,16 +87,14 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 
-	reg('termicode.clearContext',   () => provider?.injectText('/clear\r'));
-	reg('termicode.compactContext', () => provider?.injectText('/compact\r'));
-	reg('termicode.history',        () => provider?.injectText('/resume\r'));
-	reg('termicode.copyLastResponse', () => provider?.copyLastResponse());
+	reg('termicode.clearContext',    () => provider?.injectText('/clear\r'));
+	reg('termicode.compactContext',  () => provider?.injectText('/compact\r'));
+	reg('termicode.history',         () => provider?.injectText('/resume\r'));
+	reg('termicode.copyLastResponse',() => provider?.copyLastResponse());
 
-	// Cmd+L: attach selection + show panel, or toggle the secondary sidebar
 	reg('termicode.cmdL', () => {
 		const editor = vscode.window.activeTextEditor;
 		if (editor && !editor.selection.isEmpty) {
-			// Has selection → inject code block then make sure panel is visible
 			const sel = editor.selection;
 			const text = editor.document.getText(sel);
 			const rel = provider?.getRelativePath() ?? editor.document.uri.fsPath;
@@ -112,27 +102,35 @@ export function activate(context: vscode.ExtensionContext) {
 			const startLine = sel.start.line + 1;
 			const endLine = sel.end.line + 1;
 			const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
-			const block = `\`\`\`${lang}\n# ${rel}:${lineRange}\n${text}\n\`\`\`\n`;
-			provider?.injectText(block);
+			provider?.injectText(`\`\`\`${lang}\n# ${rel}:${lineRange}\n${text}\n\`\`\`\n`);
 			vscode.commands.executeCommand('workbench.view.extension.termicode-claude');
 		} else {
-			// No selection → toggle the secondary sidebar (show/hide)
 			vscode.commands.executeCommand('workbench.action.toggleAuxiliaryBar');
 		}
 	});
 }
 
-export function deactivate() {
-	provider = undefined;
-}
+export function deactivate() { provider = undefined; }
 
 // ---------------------------------------------------------------------------
+
+interface Session {
+	id: string;
+	bridge?: cp.ChildProcess;
+	startupBuffer: string;
+	modelParsed: boolean;
+	responseBuffer: string;
+	cwd: string;
+	label: string;
+}
 
 type WebviewMessage =
 	| { type: 'ready' }
 	| { type: 'input'; data: string }
 	| { type: 'resize'; cols: number; rows: number }
 	| { type: 'command'; command: string }
+	| { type: 'switchTab'; id: string }
+	| { type: 'closeTab'; id: string }
 	| { type: 'applyCode'; filepath: string; code: string }
 	| { type: 'dropImage'; name: string };
 
@@ -141,8 +139,6 @@ function stripAnsi(s: string): string {
 }
 
 function parseModelName(plain: string): string | null {
-	// Claude Code startup banner typically looks like:
-	// "claude-sonnet-4-5" or "Sonnet 4.5 (1M context)" or "Using model: ..."
 	const patterns = [
 		/\b(claude-[a-z0-9-]+)/i,
 		/\b(sonnet|opus|haiku)[\s-]+([\d.]+[^\s,\r\n]*)/i,
@@ -160,14 +156,9 @@ function parseModelName(plain: string): string | null {
 class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 
 	private view?: vscode.WebviewView;
-	private bridge?: cp.ChildProcess;
-
-	// Model detection
-	private startupBuffer = '';
-	private modelParsed = false;
-
-	// Copy-last-response buffer (raw, since last user submission)
-	private responseBuffer = '';
+	private sessions = new Map<string, Session>();
+	private activeSessionId: string | null = null;
+	private sessionCounter = 0;
 
 	constructor(private readonly context: vscode.ExtensionContext) { }
 
@@ -186,125 +177,171 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 		webviewView.webview.onDidReceiveMessage(async (msg: WebviewMessage) => {
 			switch (msg.type) {
 				case 'ready':
-					this.startSession();
+					// Start first session automatically
+					this.newSession();
 					break;
 
-				case 'input':
+				case 'input': {
 					if (msg.data) {
-						// Reset response buffer when user submits (Enter = \r)
-						if (msg.data.includes('\r')) { this.responseBuffer = ''; }
-						this.bridge?.stdin?.write(msg.data);
+						const s = this.activeSession();
+						if (s) {
+							if (msg.data.includes('\r')) { s.responseBuffer = ''; }
+							s.bridge?.stdin?.write(msg.data);
+						}
 					}
 					break;
+				}
 
-				case 'resize':
+				case 'resize': {
 					if (msg.cols && msg.rows) {
-						this.bridge?.stdin?.write(`\x1b[8;${msg.rows};${msg.cols}t`);
+						// resize all sessions so they're ready when switched to
+						for (const s of this.sessions.values()) {
+							s.bridge?.stdin?.write(`\x1b[8;${msg.rows};${msg.cols}t`);
+						}
 					}
 					break;
+				}
 
 				case 'command':
-					if ((msg as any).command) {
-						vscode.commands.executeCommand((msg as any).command);
+					vscode.commands.executeCommand((msg as any).command);
+					break;
+
+				case 'switchTab':
+					if (this.sessions.has((msg as any).id)) {
+						this.activeSessionId = (msg as any).id;
 					}
+					break;
+
+				case 'closeTab':
+					this.closeSession((msg as any).id);
 					break;
 
 				case 'applyCode':
-					if ((msg as any).filepath && (msg as any).code !== undefined) {
-						await this.applyCodeToFile((msg as any).filepath, (msg as any).code);
-					}
+					await this.applyCodeToFile((msg as any).filepath, (msg as any).code);
 					break;
 
 				case 'dropImage':
-					if ((msg as any).name) {
-						await this.resolveDroppedImage((msg as any).name);
-					}
+					await this.resolveDroppedImage((msg as any).name);
 					break;
 			}
 		});
 
 		webviewView.onDidDispose(() => {
-			this.bridge?.kill();
-			this.bridge = undefined;
+			for (const s of this.sessions.values()) { s.bridge?.kill(); }
+			this.sessions.clear();
+			this.activeSessionId = null;
 		});
 	}
 
 	// -------------------------------------------------------------------------
 	// Session management
 
-	restartSession() {
-		this.bridge?.kill();
-		this.bridge = undefined;
-		this.startupBuffer = '';
-		this.modelParsed = false;
-		this.responseBuffer = '';
-		this.view?.webview.postMessage({ type: 'reset' });
-		setTimeout(() => this.startSession(), 200);
+	newSession() {
+		const id = String(++this.sessionCounter);
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+		const label = path.basename(cwd);
+		const session: Session = {
+			id, cwd, label,
+			startupBuffer: '', modelParsed: false, responseBuffer: '',
+		};
+		this.sessions.set(id, session);
+		this.activeSessionId = id;
+
+		// tell webview to create the terminal tab and switch to it
+		this.view?.webview.postMessage({ type: 'newTab', id, label });
+
+		this.startBridge(session);
 	}
 
-	private startSession() {
-		if (this.bridge) { return; }
+	// legacy alias used by restartSession command
+	restartSession() {
+		const s = this.activeSession();
+		if (s) {
+			s.bridge?.kill();
+			s.bridge = undefined;
+			s.startupBuffer = '';
+			s.modelParsed = false;
+			s.responseBuffer = '';
+			this.view?.webview.postMessage({ type: 'resetTab', id: s.id });
+			setTimeout(() => this.startBridge(s), 200);
+		} else {
+			this.newSession();
+		}
+	}
 
-		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+	private closeSession(id: string) {
+		const s = this.sessions.get(id);
+		if (!s) { return; }
+		s.bridge?.kill();
+		this.sessions.delete(id);
+
+		if (this.activeSessionId === id) {
+			const remaining = [...this.sessions.keys()];
+			this.activeSessionId = remaining.length > 0 ? remaining[remaining.length - 1] : null;
+			if (this.activeSessionId) {
+				this.view?.webview.postMessage({ type: 'activateTab', id: this.activeSessionId });
+			}
+		}
+	}
+
+	private startBridge(session: Session) {
 		const claudePath = this.resolveClaudePath();
 		const bridgePath = path.join(this.context.extensionPath, 'media', 'pty_bridge.py');
+		const shortCwd = session.cwd.replace(os.homedir(), '~');
 
-		this.write(`\x1b[90mStarting Claude Code in ${cwd}...\x1b[0m\r\n`);
+		this.write(session.id, `\x1b[90mStarting Claude Code in ${session.cwd}...\x1b[0m\r\n`);
+		this.view?.webview.postMessage({ type: 'sessionStarted', id: session.id, cwd: shortCwd });
 
-		// Notify status bar
-		const shortCwd = cwd.replace(os.homedir(), '~');
-		this.view?.webview.postMessage({ type: 'sessionStarted', cwd: shortCwd });
-
-		this.bridge = cp.spawn('python3', [bridgePath, claudePath, '120', '40'], {
-			cwd,
+		session.bridge = cp.spawn('python3', [bridgePath, claudePath, '120', '40'], {
+			cwd: session.cwd,
 			env: { ...process.env },
 		});
 
-		this.bridge.stdout?.on('data', (chunk: Buffer) => {
+		session.bridge.stdout?.on('data', (chunk: Buffer) => {
 			const text = chunk.toString('utf8');
-			this.write(text);
-			this.responseBuffer += text;
+			this.write(session.id, text);
+			session.responseBuffer += text;
 
-			// Parse model name from startup banner
-			if (!this.modelParsed) {
-				this.startupBuffer += stripAnsi(text);
-				if (this.startupBuffer.length > 4096) { this.modelParsed = true; }
-				const name = parseModelName(this.startupBuffer);
+			if (!session.modelParsed) {
+				session.startupBuffer += stripAnsi(text);
+				if (session.startupBuffer.length > 4096) { session.modelParsed = true; }
+				const name = parseModelName(session.startupBuffer);
 				if (name) {
-					this.modelParsed = true;
-					this.view?.webview.postMessage({ type: 'modelName', name });
+					session.modelParsed = true;
+					this.view?.webview.postMessage({ type: 'modelName', id: session.id, name });
 				}
 			}
 		});
 
-		this.bridge.stderr?.on('data', (chunk: Buffer) => {
-			this.write(chunk.toString('utf8'));
+		session.bridge.stderr?.on('data', (chunk: Buffer) => {
+			this.write(session.id, chunk.toString('utf8'));
 		});
 
-		this.bridge.on('error', (err) => {
-			this.write(`\r\n\x1b[31m[Failed to start: ${err.message}]\x1b[0m\r\n`);
+		session.bridge.on('error', (err) => {
+			this.write(session.id, `\r\n\x1b[31m[Failed to start: ${err.message}]\x1b[0m\r\n`);
 			if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-				this.write(`\x1b[33mMake sure "claude" is installed, or set termicode.claudePath in settings.\x1b[0m\r\n`);
+				this.write(session.id, `\x1b[33mMake sure "claude" is installed or set termicode.claudePath.\x1b[0m\r\n`);
 			}
-			this.bridge = undefined;
+			session.bridge = undefined;
 		});
 
-		this.bridge.on('exit', (code) => {
-			this.bridge = undefined;
-			this.view?.webview.postMessage({ type: 'sessionEnded' });
-			this.write(`\r\n\x1b[90m[Session ended (code ${code}). Press + to start a new session.]\x1b[0m\r\n`);
+		session.bridge.on('exit', (code) => {
+			session.bridge = undefined;
+			this.view?.webview.postMessage({ type: 'sessionEnded', id: session.id });
+			this.write(session.id, `\r\n\x1b[90m[Session ended (code ${code}). Press + to start a new session.]\x1b[0m\r\n`);
 		});
 	}
 
 	// -------------------------------------------------------------------------
-	// Public feature methods (called from activate() command handlers)
+	// Public feature methods
 
 	injectText(text: string) {
-		if (!this.bridge?.stdin) {
-			vscode.window.showWarningMessage('Termicode: No active Claude session — start one first.');
+		const s = this.activeSession();
+		if (!s?.bridge?.stdin) {
+			vscode.window.showWarningMessage('Termicode: No active Claude session.');
 			return;
 		}
-		this.bridge.stdin.write(text);
+		s.bridge.stdin.write(text);
 	}
 
 	getRelativePath(fileUri?: vscode.Uri): string | undefined {
@@ -315,7 +352,8 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 	}
 
 	async copyLastResponse() {
-		const plain = stripAnsi(this.responseBuffer).trim();
+		const s = this.activeSession();
+		const plain = s ? stripAnsi(s.responseBuffer).trim() : '';
 		if (!plain) {
 			vscode.window.showInformationMessage('Termicode: No response to copy yet.');
 			return;
@@ -324,69 +362,42 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 		vscode.window.showInformationMessage('Termicode: Last response copied to clipboard.');
 	}
 
-	// -------------------------------------------------------------------------
-	// Apply code block to file
+	private activeSession(): Session | undefined {
+		return this.activeSessionId ? this.sessions.get(this.activeSessionId) : undefined;
+	}
 
 	private async applyCodeToFile(filepath: string, code: string) {
-		const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-		const absPath = workspaceRoot
-			? path.resolve(workspaceRoot, filepath)
-			: path.resolve(filepath);
-
+		const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		const absPath = root ? path.resolve(root, filepath) : path.resolve(filepath);
 		const uri = vscode.Uri.file(absPath);
-
 		const answer = await vscode.window.showInformationMessage(
 			`Apply Claude's code to ${path.basename(filepath)}?`,
-			{ modal: true },
-			'Apply', 'Open Diff'
+			{ modal: true }, 'Apply', 'Open Diff'
 		);
-
 		if (answer === 'Apply') {
 			await vscode.workspace.fs.writeFile(uri, Buffer.from(code, 'utf8'));
 			const doc = await vscode.workspace.openTextDocument(uri);
 			await vscode.window.showTextDocument(doc, { preview: true });
-			vscode.window.showInformationMessage(`Applied to ${path.basename(filepath)}`);
 		} else if (answer === 'Open Diff') {
 			let existingUri = uri;
 			try { fs.accessSync(absPath); } catch { existingUri = vscode.Uri.parse('untitled:empty'); }
-			const proposed = await vscode.workspace.openTextDocument({
-				content: code,
-				language: vscode.window.activeTextEditor?.document.languageId ?? 'plaintext',
-			});
-			await vscode.commands.executeCommand(
-				'vscode.diff',
-				existingUri,
-				proposed.uri,
-				`${path.basename(filepath)}: Current ↔ Claude`
-			);
+			const proposed = await vscode.workspace.openTextDocument({ content: code });
+			await vscode.commands.executeCommand('vscode.diff', existingUri, proposed.uri, `${path.basename(filepath)}: Current ↔ Claude`);
 		}
 	}
 
-	// Resolve a dropped image filename to an absolute path
 	private async resolveDroppedImage(name: string) {
 		const matches = await vscode.workspace.findFiles(`**/${name}`, undefined, 5);
 		if (matches.length === 1) {
 			this.injectText(`${matches[0].fsPath} `);
 		} else if (matches.length > 1) {
-			const picked = await vscode.window.showQuickPick(
-				matches.map(u => u.fsPath),
-				{ title: `Multiple matches — pick the image: ${name}` }
-			);
+			const picked = await vscode.window.showQuickPick(matches.map(u => u.fsPath));
 			if (picked) { this.injectText(`${picked} `); }
 		} else {
-			// Fallback: show file picker
-			const uris = await vscode.window.showOpenDialog({
-				canSelectFiles: true,
-				canSelectMany: false,
-				filters: { 'Images': ['png', 'jpg', 'jpeg', 'gif', 'webp'] },
-				title: `Locate dropped file: ${name}`,
-			});
+			const uris = await vscode.window.showOpenDialog({ canSelectFiles: true, canSelectMany: false, filters: { 'Images': ['png', 'jpg', 'jpeg', 'gif', 'webp'] } });
 			if (uris?.[0]) { this.injectText(`${uris[0].fsPath} `); }
 		}
 	}
-
-	// -------------------------------------------------------------------------
-	// Helpers
 
 	private resolveClaudePath(): string {
 		const configured = vscode.workspace.getConfiguration('termicode').get<string>('claudePath', '');
@@ -403,8 +414,8 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 		return 'claude';
 	}
 
-	private write(data: string) {
-		this.view?.webview.postMessage({ type: 'write', data });
+	private write(sessionId: string, data: string) {
+		this.view?.webview.postMessage({ type: 'write', id: sessionId, data });
 	}
 
 	// -------------------------------------------------------------------------
@@ -436,6 +447,91 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 			font-size: 11px;
 		}
 
+		/* ── Session tab bar ─────────────────────────────────── */
+		#tab-bar {
+			display: flex;
+			align-items: stretch;
+			background: var(--vscode-editorGroupHeader-tabsBackground, #2d2d2d);
+			border-bottom: 1px solid var(--vscode-editorGroupHeader-tabsBorder, #252526);
+			height: 35px;
+			overflow-x: auto;
+			overflow-y: hidden;
+			flex-shrink: 0;
+			scrollbar-width: none;
+		}
+		#tab-bar::-webkit-scrollbar { display: none; }
+
+		.session-tab {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			padding: 0 10px 0 12px;
+			border: none;
+			border-right: 1px solid var(--vscode-editorGroupHeader-tabsBorder, #252526);
+			background: var(--vscode-tab-inactiveBackground, #2d2d2d);
+			color: var(--vscode-tab-inactiveForeground, #888);
+			cursor: pointer;
+			white-space: nowrap;
+			font-size: 11px;
+			min-width: 80px;
+			max-width: 150px;
+			flex-shrink: 0;
+			position: relative;
+			transition: background 0.1s;
+		}
+		.session-tab:hover { background: var(--vscode-tab-hoverBackground, #323232); color: var(--vscode-tab-hoverForeground, #aaa); }
+		.session-tab.active {
+			background: var(--vscode-tab-activeBackground, #1e1e1e);
+			color: var(--vscode-tab-activeForeground, #fff);
+			border-top: 1px solid var(--vscode-tab-activeBorderTop, #007acc);
+		}
+		.tab-dot {
+			width: 5px; height: 5px;
+			border-radius: 50%;
+			background: #444;
+			flex-shrink: 0;
+			transition: background 0.3s;
+		}
+		.session-tab.running .tab-dot { background: #4ec9b0; }
+		.tab-label {
+			flex: 1;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+		.tab-close {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			width: 16px; height: 16px;
+			border: none;
+			border-radius: 3px;
+			background: transparent;
+			color: inherit;
+			cursor: pointer;
+			font-size: 14px;
+			opacity: 0;
+			flex-shrink: 0;
+			line-height: 1;
+			transition: opacity 0.1s, background 0.1s;
+		}
+		.session-tab:hover .tab-close,
+		.session-tab.active .tab-close { opacity: 0.6; }
+		.tab-close:hover { opacity: 1 !important; background: rgba(255,255,255,.1); }
+
+		#btn-new-tab {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 35px;
+			border: none;
+			background: transparent;
+			color: var(--vscode-tab-inactiveForeground, #666);
+			cursor: pointer;
+			font-size: 18px;
+			flex-shrink: 0;
+		}
+		#btn-new-tab:hover { color: var(--vscode-foreground, #fff); background: rgba(255,255,255,.05); }
+
 		/* ── Status bar ───────────────────────────────────────── */
 		#status-bar {
 			display: flex;
@@ -461,63 +557,9 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 		#status-label { color: var(--vscode-foreground, #ccc); font-weight: 500; }
 		.st-sep { opacity: 0.25; margin: 0 1px; }
 		#status-model { color: var(--vscode-descriptionForeground, #666); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		#status-cwd   { color: var(--vscode-descriptionForeground, #555); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+		#status-cwd   { color: var(--vscode-descriptionForeground, #555); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-		/* ── Terminal ─────────────────────────────────────────── */
-		/* ── Toolbar ─────────────────────────────────────────── */
-		#toolbar {
-			display: flex;
-			align-items: center;
-			gap: 1px;
-			padding: 2px 4px;
-			background: var(--vscode-sideBar-background, #252526);
-			border-top: 1px solid var(--vscode-sideBarSectionHeader-border, #3c3c3c);
-			flex-shrink: 0;
-		}
-
-		.tb-btn {
-			display: inline-flex;
-			align-items: center;
-			justify-content: center;
-			width: 28px;
-			height: 26px;
-			padding: 0;
-			border: none;
-			border-radius: 4px;
-			background: transparent;
-			color: var(--vscode-icon-foreground, #c5c5c5);
-			cursor: pointer;
-			flex-shrink: 0;
-		}
-		.tb-btn svg { display: block; pointer-events: none; }
-		.tb-btn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,.1)); color: var(--vscode-foreground, #fff); }
-		.tb-btn:active { background: var(--vscode-toolbar-activeBackground, rgba(255,255,255,.18)); }
-		.tb-btn.danger:hover { color: var(--vscode-errorForeground, #f48771); }
-
-		.tb-sep {
-			width: 1px;
-			height: 16px;
-			background: var(--vscode-widget-border, #404040);
-			margin: 0 3px;
-			flex-shrink: 0;
-			opacity: 0.6;
-		}
-
-		#model-badge {
-			margin-left: auto;
-			font-size: 10px;
-			color: var(--vscode-descriptionForeground, #888);
-			white-space: nowrap;
-			overflow: hidden;
-			text-overflow: ellipsis;
-			max-width: 140px;
-			padding: 0 6px 0 4px;
-			opacity: 0;
-			transition: opacity 0.5s;
-			letter-spacing: 0.01em;
-		}
-		#model-badge.visible { opacity: 1; }
-
+		/* ── Terminal area ────────────────────────────────────── */
 		#terminal-wrap {
 			flex: 1;
 			min-height: 0;
@@ -525,48 +567,19 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 			overflow: hidden;
 			padding: 6px 8px 4px;
 		}
-		#terminal { width: 100%; height: 100%; }
 
-		/* thin VS Code-style scrollbar inside xterm */
+		.term-instance {
+			position: absolute;
+			inset: 6px 8px 4px;
+			display: none;
+		}
+		.term-instance.active { display: block; }
+
+		/* thin VS Code-style scrollbar */
 		.xterm-viewport::-webkit-scrollbar { width: 6px; }
 		.xterm-viewport::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 3px; }
 		.xterm-viewport::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.25); }
 		.xterm-viewport::-webkit-scrollbar-track { background: transparent; }
-
-		/* ── Apply bar ───────────────────────────────────────── */
-		#apply-bar {
-			display: none;
-			align-items: center;
-			gap: 6px;
-			padding: 4px 8px;
-			background: var(--vscode-editorInfo-background, #1f3a5f);
-			border-top: 1px solid var(--vscode-editorInfo-border, #2e6da4);
-			flex-shrink: 0;
-			font-size: 11px;
-			color: var(--vscode-foreground, #ccc);
-		}
-		#apply-bar.visible { display: flex; }
-		#apply-file { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		#btn-apply {
-			padding: 2px 10px;
-			border: none;
-			border-radius: 3px;
-			background: var(--vscode-button-background, #0e639c);
-			color: var(--vscode-button-foreground, #fff);
-			cursor: pointer;
-			font-size: 11px;
-		}
-		#btn-apply:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
-		#btn-apply-diff {
-			padding: 2px 8px;
-			border: 1px solid var(--vscode-button-border, #555);
-			border-radius: 3px;
-			background: transparent;
-			color: var(--vscode-foreground, #ccc);
-			cursor: pointer;
-			font-size: 11px;
-		}
-		#btn-apply-diff:hover { background: rgba(255,255,255,.1); }
 
 		/* ── Drag overlay ────────────────────────────────────── */
 		#drag-overlay {
@@ -583,9 +596,87 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 			pointer-events: none;
 		}
 		#drag-overlay.visible { display: flex; }
+
+		/* ── Apply code bar ───────────────────────────────────── */
+		#apply-bar {
+			display: none;
+			align-items: center;
+			gap: 6px;
+			padding: 4px 8px;
+			background: var(--vscode-editorInfo-background, #1f3a5f);
+			border-top: 1px solid var(--vscode-editorInfo-border, #2e6da4);
+			flex-shrink: 0;
+			font-size: 11px;
+			color: var(--vscode-foreground, #ccc);
+		}
+		#apply-bar.visible { display: flex; }
+		#apply-file { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		#btn-apply {
+			padding: 2px 10px; border: none; border-radius: 3px;
+			background: var(--vscode-button-background, #0e639c);
+			color: var(--vscode-button-foreground, #fff);
+			cursor: pointer; font-size: 11px;
+		}
+		#btn-apply:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
+		#btn-apply-diff {
+			padding: 2px 8px;
+			border: 1px solid var(--vscode-button-border, #555);
+			border-radius: 3px; background: transparent;
+			color: var(--vscode-foreground, #ccc);
+			cursor: pointer; font-size: 11px;
+		}
+		#btn-apply-diff:hover { background: rgba(255,255,255,.1); }
+
+		/* ── Bottom toolbar ───────────────────────────────────── */
+		#toolbar {
+			display: flex;
+			align-items: center;
+			gap: 1px;
+			padding: 2px 4px;
+			background: var(--vscode-sideBar-background, #252526);
+			border-top: 1px solid var(--vscode-sideBarSectionHeader-border, #3c3c3c);
+			flex-shrink: 0;
+		}
+		.tb-btn {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 28px; height: 26px;
+			padding: 0;
+			border: none;
+			border-radius: 4px;
+			background: transparent;
+			color: var(--vscode-icon-foreground, #c5c5c5);
+			cursor: pointer;
+			flex-shrink: 0;
+		}
+		.tb-btn svg { display: block; pointer-events: none; }
+		.tb-btn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,.1)); color: var(--vscode-foreground, #fff); }
+		.tb-btn:active { background: var(--vscode-toolbar-activeBackground, rgba(255,255,255,.18)); }
+		.tb-btn.danger:hover { color: var(--vscode-errorForeground, #f48771); }
+		.tb-sep {
+			width: 1px; height: 16px;
+			background: var(--vscode-widget-border, #404040);
+			margin: 0 3px; flex-shrink: 0; opacity: 0.6;
+		}
+		#model-badge {
+			margin-left: auto;
+			font-size: 10px;
+			color: var(--vscode-descriptionForeground, #888);
+			white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+			max-width: 140px; padding: 0 6px 0 4px;
+			opacity: 0; transition: opacity 0.5s;
+		}
+		#model-badge.visible { opacity: 1; }
 	</style>
 </head>
 <body>
+
+	<!-- Session tab bar -->
+	<div id="tab-bar">
+		<button id="btn-new-tab" title="New Claude Session  ⌘⌥N">+</button>
+	</div>
+
 	<!-- Status bar -->
 	<div id="status-bar">
 		<span id="status-dot"></span>
@@ -596,13 +687,12 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 		<span id="status-cwd"></span>
 	</div>
 
-	<!-- Terminal -->
+	<!-- Terminal area (multiple instances stacked) -->
 	<div id="terminal-wrap">
-		<div id="terminal"></div>
 		<div id="drag-overlay">Drop image to add to Claude</div>
 	</div>
 
-	<!-- Apply code bar (shown when a code block with a file path is detected) -->
+	<!-- Apply code bar -->
 	<div id="apply-bar">
 		<span>Claude suggests changes to</span>
 		<span id="apply-file"></span>
@@ -610,65 +700,28 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 		<button id="btn-apply-diff">Diff</button>
 	</div>
 
-	<!-- Toolbar (bottom) -->
+	<!-- Bottom toolbar -->
 	<div id="toolbar">
-
-		<!-- Add current file -->
 		<button class="tb-btn" id="btn-addFile" title="Add Current File  ⌘⇧A">
-			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-				<path d="M9 1.5H4.5A.5.5 0 004 2v12a.5.5 0 00.5.5h7a.5.5 0 00.5-.5V5.5L9 1.5zm0 1.2l2.3 2.3H9V2.7zM5 14V2.5h3.5V5a.5.5 0 00.5.5H12V14H5z"/>
-				<path d="M7.5 7.5V6H9v1.5h1.5V9H9v1.5H7.5V9H6V7.5h1.5z"/>
-			</svg>
+			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M9 1.5H4.5A.5.5 0 004 2v12a.5.5 0 00.5.5h7a.5.5 0 00.5-.5V5.5L9 1.5zm0 1.2l2.3 2.3H9V2.7zM5 14V2.5h3.5V5a.5.5 0 00.5.5H12V14H5z"/><path d="M7.5 7.5V6H9v1.5h1.5V9H9v1.5H7.5V9H6V7.5h1.5z"/></svg>
 		</button>
-
-		<!-- Add image -->
 		<button class="tb-btn" id="btn-addImage" title="Add Image  ⌘⌥I">
-			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-				<path d="M14 3H2a1 1 0 00-1 1v8a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1zm0 9H2V4h12v8z"/>
-				<circle cx="5" cy="6.5" r="1.1"/>
-				<path d="M2.5 12l3.5-4.5 2.5 3 2-2.5 3 4H2.5z"/>
-			</svg>
+			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M14 3H2a1 1 0 00-1 1v8a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1zm0 9H2V4h12v8z"/><circle cx="5" cy="6.5" r="1.1"/><path d="M2.5 12l3.5-4.5 2.5 3 2-2.5 3 4H2.5z"/></svg>
 		</button>
-
 		<div class="tb-sep"></div>
-
-		<!-- Clear context -->
 		<button class="tb-btn danger" id="btn-clear" title="Clear Context  ⌘⌥X">
-			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-				<path d="M10 3h3v1H2V3h3V2a1 1 0 011-1h3a1 1 0 011 1v1zm-5 0h4V2H5v1zm6 2H4.5l.5 8.5h6L11 5zm-5.5 1v6.5h1V6h-1zm2 0v6.5h1V6h-1zm2 0v6.5h1V6h-1z"/>
-			</svg>
+			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M10 3h3v1H2V3h3V2a1 1 0 011-1h3a1 1 0 011 1v1zm-5 0h4V2H5v1zm6 2H4.5l.5 8.5h6L11 5zm-5.5 1v6.5h1V6h-1zm2 0v6.5h1V6h-1zm2 0v6.5h1V6h-1z"/></svg>
 		</button>
-
-		<!-- Compact context -->
 		<button class="tb-btn" id="btn-compact" title="Compact Context  ⌘⌥M">
-			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-				<path d="M5 4l3-3 3 3-1 1-2-2-2 2L5 4zm6 8l-3 3-3-3 1-1 2 2 2-2 1 1zM2 7h12v2H2z"/>
-			</svg>
+			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M5 4l3-3 3 3-1 1-2-2-2 2L5 4zm6 8l-3 3-3-3 1-1 2 2 2-2 1 1zM2 7h12v2H2z"/></svg>
 		</button>
-
-		<!-- Session history -->
 		<button class="tb-btn" id="btn-history" title="Session History  ⌘⌥H">
-			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-				<path d="M8 2a6 6 0 100 12A6 6 0 008 2zm0 1a5 5 0 110 10A5 5 0 018 3zm-.5 2v4l3.5 1.8-.5.9L7 9.8V5h.5z"/>
-			</svg>
+			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a6 6 0 100 12A6 6 0 008 2zm0 1a5 5 0 110 10A5 5 0 018 3zm-.5 2v4l3.5 1.8-.5.9L7 9.8V5h.5z"/></svg>
 		</button>
-
 		<div class="tb-sep"></div>
-
-		<!-- Copy last response -->
 		<button class="tb-btn" id="btn-copy" title="Copy Last Response">
-			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-				<path d="M11 2H4a1 1 0 00-1 1v9h1V3h7V2zm2 2H6a1 1 0 00-1 1v9a1 1 0 001 1h7a1 1 0 001-1V5a1 1 0 00-1-1zm0 10H6V5h7v9z"/>
-			</svg>
+			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M11 2H4a1 1 0 00-1 1v9h1V3h7V2zm2 2H6a1 1 0 00-1 1v9a1 1 0 001 1h7a1 1 0 001-1V5a1 1 0 00-1-1zm0 10H6V5h7v9z"/></svg>
 		</button>
-
-		<!-- New session -->
-		<button class="tb-btn" id="btn-new" title="New Session  ⌘⌥N">
-			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-				<path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z"/>
-			</svg>
-		</button>
-
 		<span id="model-badge"></span>
 	</div>
 

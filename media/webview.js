@@ -1,82 +1,242 @@
-/* Termicode webview – runs inside VS Code's sandboxed webview context */
+/* Termicode webview – multi-session terminal panel */
 (function () {
 	'use strict';
 
-	const vscode = acquireVsCodeApi();
+	var vscode = acquireVsCodeApi();
 
-	// ── xterm setup ────────────────────────────────────────────────────────
-	const term = new Terminal({
-		cursorBlink: true,
-		fontSize: 13,
-		fontFamily: 'var(--vscode-editor-font-family, "Cascadia Code", Menlo, monospace)',
-		theme: {
-			background:      computed('--vscode-terminal-background')      || '#1e1e1e',
-			foreground:      computed('--vscode-terminal-foreground')      || '#d4d4d4',
-			cursor:          computed('--vscode-terminalCursor-foreground') || '#aeafad',
-			black:    '#1e1e1e', red:     '#f44747', green:   '#6a9955', yellow:  '#d7ba7d',
-			blue:     '#569cd6', magenta: '#c586c0', cyan:    '#9cdcfe', white:   '#d4d4d4',
-			brightBlack:   '#808080', brightRed:    '#f44747', brightGreen:   '#b5cea8',
-			brightYellow:  '#dcdcaa', brightBlue:   '#9cdcfe', brightMagenta: '#c586c0',
-			brightCyan:    '#4ec9b0', brightWhite:  '#ffffff',
-		},
-		convertEol: true,
-		scrollback: 5000,
-	});
+	// ── Per-session state ──────────────────────────────────────────────────
+	// sessions[id] = { term, fitAddon, el, outputBuffer, pendingApply, codeBlockTimer }
+	var sessions = {};
+	var activeId = null;
 
-	const fitAddon = new FitAddon.FitAddon();
-	term.loadAddon(fitAddon);
-	term.open(document.getElementById('terminal'));
-	fitAddon.fit();
-
-	term.onData(data => vscode.postMessage({ type: 'input', data }));
-
-	new ResizeObserver(() => {
-		fitAddon.fit();
-		vscode.postMessage({ type: 'resize', cols: term.cols, rows: term.rows });
-	}).observe(document.getElementById('terminal'));
-
-	function computed(varName) {
-		return getComputedStyle(document.body).getPropertyValue(varName).trim();
+	// ── xterm theme (shared) ───────────────────────────────────────────────
+	function termTheme() {
+		var s = getComputedStyle(document.body);
+		var c = function (v) { return s.getPropertyValue(v).trim() || undefined; };
+		return {
+			background:    c('--vscode-terminal-background')       || '#1e1e1e',
+			foreground:    c('--vscode-terminal-foreground')       || '#d4d4d4',
+			cursor:        c('--vscode-terminalCursor-foreground') || '#aeafad',
+			black:'#1e1e1e', red:'#f44747',  green:'#6a9955',  yellow:'#d7ba7d',
+			blue:'#569cd6',  magenta:'#c586c0', cyan:'#9cdcfe', white:'#d4d4d4',
+			brightBlack:'#808080', brightRed:'#f44747', brightGreen:'#b5cea8',
+			brightYellow:'#dcdcaa', brightBlue:'#9cdcfe', brightMagenta:'#c586c0',
+			brightCyan:'#4ec9b0',  brightWhite:'#ffffff',
+		};
 	}
 
-	// ── Messages from extension ────────────────────────────────────────────
-	let outputBuffer = '';
-	let pendingApply = null;
-	let codeBlockTimer = null;
+	// ── Create a new terminal instance for a session ───────────────────────
+	function createSession(id, label) {
+		// DOM element
+		var el = document.createElement('div');
+		el.className = 'term-instance';
+		el.id = 'term-' + id;
+		document.getElementById('terminal-wrap').appendChild(el);
 
+		// xterm
+		var term = new Terminal({
+			cursorBlink: true,
+			fontSize: 13,
+			fontFamily: 'var(--vscode-editor-font-family, "Cascadia Code", Menlo, monospace)',
+			theme: termTheme(),
+			convertEol: true,
+			scrollback: 5000,
+		});
+		var fitAddon = new FitAddon.FitAddon();
+		term.loadAddon(fitAddon);
+		term.open(el);
+		fitAddon.fit();
+
+		term.onData(function (data) {
+			if (id === activeId) {
+				vscode.postMessage({ type: 'input', data: data });
+			}
+		});
+
+		var session = {
+			id: id,
+			label: label,
+			term: term,
+			fitAddon: fitAddon,
+			el: el,
+			outputBuffer: '',
+			pendingApply: null,
+			codeBlockTimer: null,
+		};
+		sessions[id] = session;
+
+		// Add tab button
+		addTab(id, label);
+
+		return session;
+	}
+
+	// ── Tab bar ────────────────────────────────────────────────────────────
+	function addTab(id, label) {
+		var tabBar = document.getElementById('tab-bar');
+		var newTabBtn = document.getElementById('btn-new-tab');
+
+		var tab = document.createElement('button');
+		tab.className = 'session-tab';
+		tab.dataset.id = id;
+
+		var dot = document.createElement('span');
+		dot.className = 'tab-dot';
+
+		var lbl = document.createElement('span');
+		lbl.className = 'tab-label';
+		lbl.textContent = label;
+
+		var cls = document.createElement('button');
+		cls.className = 'tab-close';
+		cls.textContent = '×';
+		cls.title = 'Close session';
+		cls.addEventListener('click', function (e) {
+			e.stopPropagation();
+			vscode.postMessage({ type: 'closeTab', id: id });
+			destroySession(id);
+		});
+
+		tab.appendChild(dot);
+		tab.appendChild(lbl);
+		tab.appendChild(cls);
+		tab.addEventListener('click', function () { activateSession(id); });
+
+		tabBar.insertBefore(tab, newTabBtn);
+		activateSession(id);
+	}
+
+	function activateSession(id) {
+		if (!sessions[id]) { return; }
+
+		// deactivate current
+		if (activeId && sessions[activeId]) {
+			sessions[activeId].el.classList.remove('active');
+			var oldTab = document.querySelector('.session-tab[data-id="' + activeId + '"]');
+			if (oldTab) { oldTab.classList.remove('active'); }
+		}
+
+		activeId = id;
+		var session = sessions[id];
+
+		// show terminal
+		session.el.classList.add('active');
+
+		// update tab highlight
+		var tab = document.querySelector('.session-tab[data-id="' + id + '"]');
+		if (tab) { tab.classList.add('active'); }
+
+		// refit after becoming visible
+		setTimeout(function () { session.fitAddon.fit(); }, 30);
+
+		// tell extension which session is active
+		vscode.postMessage({ type: 'switchTab', id: id });
+	}
+
+	function destroySession(id) {
+		var session = sessions[id];
+		if (!session) { return; }
+
+		session.term.dispose();
+		session.el.remove();
+
+		var tab = document.querySelector('.session-tab[data-id="' + id + '"]');
+		if (tab) { tab.remove(); }
+
+		delete sessions[id];
+
+		// switch to another session if this was active
+		if (activeId === id) {
+			activeId = null;
+			var ids = Object.keys(sessions);
+			if (ids.length > 0) {
+				activateSession(ids[ids.length - 1]);
+			} else {
+				setStatus(false, '', '');
+			}
+		}
+	}
+
+	// ── Resize observer ────────────────────────────────────────────────────
+	new ResizeObserver(function () {
+		if (activeId && sessions[activeId]) {
+			sessions[activeId].fitAddon.fit();
+			var t = sessions[activeId].term;
+			vscode.postMessage({ type: 'resize', cols: t.cols, rows: t.rows });
+		}
+	}).observe(document.getElementById('terminal-wrap'));
+
+	// ── Messages from extension ────────────────────────────────────────────
 	window.addEventListener('message', function (event) {
 		var msg = event.data;
+		var session = msg.id ? sessions[msg.id] : null;
+
 		switch (msg.type) {
-			case 'write':
-				term.write(msg.data);
-				outputBuffer += stripAnsi(msg.data);
-				if (outputBuffer.length > 40000) { outputBuffer = outputBuffer.slice(-20000); }
-				clearTimeout(codeBlockTimer);
-				codeBlockTimer = setTimeout(scanForCodeBlock, 1200);
+
+			case 'newTab':
+				createSession(msg.id, msg.label);
 				break;
 
-			case 'reset':
-				term.reset();
-				outputBuffer = '';
-				pendingApply = null;
-				hideApplyBar();
-				setStatus(false, '', '');
+			case 'activateTab':
+				activateSession(msg.id);
+				break;
+
+			case 'resetTab':
+				if (session) {
+					session.term.reset();
+					session.outputBuffer = '';
+					session.pendingApply = null;
+					hideApplyBar();
+				}
+				break;
+
+			case 'write':
+				if (session) {
+					session.term.write(msg.data);
+					session.outputBuffer += stripAnsi(msg.data);
+					if (session.outputBuffer.length > 40000) {
+						session.outputBuffer = session.outputBuffer.slice(-20000);
+					}
+					if (msg.id === activeId) {
+						clearTimeout(session.codeBlockTimer);
+						session.codeBlockTimer = setTimeout(function () {
+							scanForCodeBlock(session);
+						}, 1200);
+					}
+				}
 				break;
 
 			case 'sessionStarted':
-				setStatus(true, '', msg.cwd || '');
+				if (session) {
+					var tab = document.querySelector('.session-tab[data-id="' + msg.id + '"]');
+					if (tab) { tab.classList.add('running'); }
+				}
+				if (msg.id === activeId) {
+					setStatus(true, '', msg.cwd || '');
+				}
 				break;
 
 			case 'modelName':
-				var badge = document.getElementById('model-badge');
-				badge.textContent = msg.name;
-				badge.classList.add('visible');
-				document.getElementById('status-model').textContent = msg.name;
+				if (session) {
+					var tab2 = document.querySelector('.session-tab[data-id="' + msg.id + '"] .tab-label');
+					// optionally update tab label with short model
+				}
+				if (msg.id === activeId) {
+					document.getElementById('model-badge').textContent = msg.name;
+					document.getElementById('model-badge').classList.add('visible');
+					document.getElementById('status-model').textContent = msg.name;
+				}
 				break;
 
 			case 'sessionEnded':
-				document.getElementById('model-badge').classList.remove('visible');
-				setStatus(false, '', '');
+				if (session) {
+					var tab3 = document.querySelector('.session-tab[data-id="' + msg.id + '"]');
+					if (tab3) { tab3.classList.remove('running'); }
+				}
+				if (msg.id === activeId) {
+					document.getElementById('model-badge').classList.remove('visible');
+					setStatus(false, '', '');
+				}
 				break;
 		}
 	});
@@ -94,40 +254,30 @@
 			dot.classList.remove('active');
 			label.textContent = 'No session';
 			document.getElementById('status-model').textContent = '';
+			document.getElementById('model-badge').classList.remove('visible');
 		}
-		if (cwd) {
-			cwdEl.textContent = cwd;
-			sep.style.display = '';
-		} else {
-			cwdEl.textContent = '';
-			sep.style.display = 'none';
-		}
+		cwdEl.textContent = cwd || '';
+		sep.style.display = cwd ? '' : 'none';
 	}
 
 	// ── ANSI strip ─────────────────────────────────────────────────────────
 	function stripAnsi(s) {
-		// eslint-disable-next-line no-control-regex
 		return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\r/g, '');
 	}
 
 	// ── Code block detection ───────────────────────────────────────────────
-	// Detects fenced code blocks that carry a file reference in their first comment line:
-	//   ```lang
-	//   # path/to/file.ts:42
-	//   <code>
-	//   ```
-	function scanForCodeBlock() {
-		var tick = '\x60\x60\x60'; // three backticks
+	function scanForCodeBlock(session) {
+		var tick = '\x60\x60\x60';
 		var pattern = tick + '([\\w]*)\\n#\\s*([^\\n]+\\.[\\S]+)[^\\n]*\\n([\\s\\S]*?)' + tick;
 		var re = new RegExp(pattern, 'g');
 		var m, last;
-		while ((m = re.exec(outputBuffer)) !== null) { last = m; }
+		while ((m = re.exec(session.outputBuffer)) !== null) { last = m; }
 		if (!last) { return; }
 		var filepath = last[2].split(':')[0].trim();
 		var code = last[3];
 		if (!filepath || !code) { return; }
-		pendingApply = { filepath: filepath, code: code };
-		showApplyBar(filepath);
+		session.pendingApply = { filepath: filepath, code: code };
+		if (session.id === activeId) { showApplyBar(filepath); }
 	}
 
 	function showApplyBar(filepath) {
@@ -140,22 +290,29 @@
 	}
 
 	document.getElementById('btn-apply').addEventListener('click', function () {
-		if (pendingApply) {
-			vscode.postMessage({ type: 'applyCode', filepath: pendingApply.filepath, code: pendingApply.code });
+		var session = activeId ? sessions[activeId] : null;
+		if (session && session.pendingApply) {
+			vscode.postMessage({ type: 'applyCode', filepath: session.pendingApply.filepath, code: session.pendingApply.code });
 			hideApplyBar();
-			pendingApply = null;
+			session.pendingApply = null;
 		}
 	});
 
 	document.getElementById('btn-apply-diff').addEventListener('click', function () {
-		if (pendingApply) {
-			vscode.postMessage({ type: 'applyCode', filepath: pendingApply.filepath, code: pendingApply.code, diff: true });
+		var session = activeId ? sessions[activeId] : null;
+		if (session && session.pendingApply) {
+			vscode.postMessage({ type: 'applyCode', filepath: session.pendingApply.filepath, code: session.pendingApply.code, diff: true });
 			hideApplyBar();
-			pendingApply = null;
+			session.pendingApply = null;
 		}
 	});
 
-	// ── Toolbar → VS Code command ──────────────────────────────────────────
+	// ── New tab button ─────────────────────────────────────────────────────
+	document.getElementById('btn-new-tab').addEventListener('click', function () {
+		vscode.postMessage({ type: 'command', command: 'termicode.newSession' });
+	});
+
+	// ── Toolbar buttons ────────────────────────────────────────────────────
 	var cmdMap = {
 		'btn-addFile':  'termicode.addFile',
 		'btn-addImage': 'termicode.addImage',
@@ -163,7 +320,6 @@
 		'btn-compact':  'termicode.compactContext',
 		'btn-history':  'termicode.history',
 		'btn-copy':     'termicode.copyLastResponse',
-		'btn-new':      'termicode.newSession',
 	};
 	Object.keys(cmdMap).forEach(function (id) {
 		var el = document.getElementById(id);
@@ -187,8 +343,7 @@
 		}
 	});
 	termWrap.addEventListener('dragleave', function () {
-		dragCounter--;
-		if (dragCounter <= 0) { dragCounter = 0; overlay.classList.remove('visible'); }
+		if (--dragCounter <= 0) { dragCounter = 0; overlay.classList.remove('visible'); }
 	});
 	termWrap.addEventListener('dragover', function (e) { e.preventDefault(); });
 	termWrap.addEventListener('drop', function (e) {
