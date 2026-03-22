@@ -439,7 +439,7 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 			gap: 1px;
 			padding: 2px 4px;
 			background: var(--vscode-sideBar-background, #252526);
-			border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #3c3c3c);
+			border-top: 1px solid var(--vscode-sideBarSectionHeader-border, #3c3c3c);
 			flex-shrink: 0;
 		}
 
@@ -548,7 +548,21 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 	</style>
 </head>
 <body>
-	<!-- Toolbar -->
+	<!-- Terminal -->
+	<div id="terminal-wrap">
+		<div id="terminal"></div>
+		<div id="drag-overlay">Drop image to add to Claude</div>
+	</div>
+
+	<!-- Apply code bar (shown when a code block with a file path is detected) -->
+	<div id="apply-bar">
+		<span>Claude suggests changes to</span>
+		<span id="apply-file"></span>
+		<button id="btn-apply">Apply</button>
+		<button id="btn-apply-diff">Diff</button>
+	</div>
+
+	<!-- Toolbar (bottom) -->
 	<div id="toolbar">
 
 		<!-- Add current file -->
@@ -608,20 +622,6 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 		</button>
 
 		<span id="model-badge"></span>
-	</div>
-
-	<!-- Terminal -->
-	<div id="terminal-wrap">
-		<div id="terminal"></div>
-		<div id="drag-overlay">Drop image to add to Claude</div>
-	</div>
-
-	<!-- Apply code bar (shown when a code block with a file path is detected) -->
-	<div id="apply-bar">
-		<span>Claude suggests changes to</span>
-		<span id="apply-file"></span>
-		<button id="btn-apply">Apply</button>
-		<button id="btn-apply-diff">Diff</button>
 	</div>
 
 	<script nonce="${nonce}" src="${uri('xterm.js')}"></script>
