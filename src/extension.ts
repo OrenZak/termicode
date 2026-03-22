@@ -436,37 +436,39 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 		#toolbar {
 			display: flex;
 			align-items: center;
-			gap: 2px;
-			padding: 3px 4px;
+			gap: 1px;
+			padding: 2px 4px;
 			background: var(--vscode-sideBar-background, #252526);
 			border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #3c3c3c);
 			flex-shrink: 0;
-			flex-wrap: wrap;
 		}
 
 		.tb-btn {
 			display: inline-flex;
 			align-items: center;
-			gap: 3px;
-			padding: 2px 7px;
+			justify-content: center;
+			width: 28px;
+			height: 26px;
+			padding: 0;
 			border: none;
-			border-radius: 3px;
+			border-radius: 4px;
 			background: transparent;
 			color: var(--vscode-icon-foreground, #c5c5c5);
 			cursor: pointer;
-			font-size: 11px;
-			white-space: nowrap;
-			line-height: 18px;
+			flex-shrink: 0;
 		}
-		.tb-btn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,.1)); }
-		.tb-btn:active { background: var(--vscode-toolbar-activeBackground, rgba(255,255,255,.15)); }
+		.tb-btn svg { display: block; pointer-events: none; }
+		.tb-btn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,.1)); color: var(--vscode-foreground, #fff); }
+		.tb-btn:active { background: var(--vscode-toolbar-activeBackground, rgba(255,255,255,.18)); }
+		.tb-btn.danger:hover { color: var(--vscode-errorForeground, #f48771); }
 
 		.tb-sep {
 			width: 1px;
-			height: 14px;
-			background: var(--vscode-widget-border, #444);
-			margin: 0 2px;
+			height: 16px;
+			background: var(--vscode-widget-border, #404040);
+			margin: 0 3px;
 			flex-shrink: 0;
+			opacity: 0.6;
 		}
 
 		#model-badge {
@@ -476,10 +478,11 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 			white-space: nowrap;
 			overflow: hidden;
 			text-overflow: ellipsis;
-			max-width: 150px;
-			padding-right: 4px;
+			max-width: 140px;
+			padding: 0 6px 0 4px;
 			opacity: 0;
-			transition: opacity 0.4s;
+			transition: opacity 0.5s;
+			letter-spacing: 0.01em;
 		}
 		#model-badge.visible { opacity: 1; }
 
@@ -547,16 +550,64 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 <body>
 	<!-- Toolbar -->
 	<div id="toolbar">
-		<button class="tb-btn" id="btn-addFile"   title="Add Current File (⌘⇧A)">+File</button>
-		<button class="tb-btn" id="btn-addImage"  title="Add Image (⌘⌥I)">+Img</button>
+
+		<!-- Add current file -->
+		<button class="tb-btn" id="btn-addFile" title="Add Current File  ⌘⇧A">
+			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+				<path d="M9 1.5H4.5A.5.5 0 004 2v12a.5.5 0 00.5.5h7a.5.5 0 00.5-.5V5.5L9 1.5zm0 1.2l2.3 2.3H9V2.7zM5 14V2.5h3.5V5a.5.5 0 00.5.5H12V14H5z"/>
+				<path d="M7.5 7.5V6H9v1.5h1.5V9H9v1.5H7.5V9H6V7.5h1.5z"/>
+			</svg>
+		</button>
+
+		<!-- Add image -->
+		<button class="tb-btn" id="btn-addImage" title="Add Image  ⌘⌥I">
+			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+				<path d="M14 3H2a1 1 0 00-1 1v8a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1zm0 9H2V4h12v8z"/>
+				<circle cx="5" cy="6.5" r="1.1"/>
+				<path d="M2.5 12l3.5-4.5 2.5 3 2-2.5 3 4H2.5z"/>
+			</svg>
+		</button>
+
 		<div class="tb-sep"></div>
-		<button class="tb-btn" id="btn-clear"     title="Clear Context (⌘⌥X)">Clear</button>
-		<button class="tb-btn" id="btn-compact"   title="Compact Context (⌘⌥M)">Compact</button>
-		<button class="tb-btn" id="btn-history"   title="Session History (⌘⌥H)">History</button>
+
+		<!-- Clear context -->
+		<button class="tb-btn danger" id="btn-clear" title="Clear Context  ⌘⌥X">
+			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+				<path d="M10 3h3v1H2V3h3V2a1 1 0 011-1h3a1 1 0 011 1v1zm-5 0h4V2H5v1zm6 2H4.5l.5 8.5h6L11 5zm-5.5 1v6.5h1V6h-1zm2 0v6.5h1V6h-1zm2 0v6.5h1V6h-1z"/>
+			</svg>
+		</button>
+
+		<!-- Compact context -->
+		<button class="tb-btn" id="btn-compact" title="Compact Context  ⌘⌥M">
+			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+				<path d="M5 4l3-3 3 3-1 1-2-2-2 2L5 4zm6 8l-3 3-3-3 1-1 2 2 2-2 1 1zM2 7h12v2H2z"/>
+			</svg>
+		</button>
+
+		<!-- Session history -->
+		<button class="tb-btn" id="btn-history" title="Session History  ⌘⌥H">
+			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+				<path d="M8 2a6 6 0 100 12A6 6 0 008 2zm0 1a5 5 0 110 10A5 5 0 018 3zm-.5 2v4l3.5 1.8-.5.9L7 9.8V5h.5z"/>
+			</svg>
+		</button>
+
 		<div class="tb-sep"></div>
-		<button class="tb-btn" id="btn-copy"      title="Copy Last Response">Copy</button>
-		<button class="tb-btn" id="btn-new"       title="New Session (⌘⌥N)">＋</button>
-		<span   id="model-badge"></span>
+
+		<!-- Copy last response -->
+		<button class="tb-btn" id="btn-copy" title="Copy Last Response">
+			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+				<path d="M11 2H4a1 1 0 00-1 1v9h1V3h7V2zm2 2H6a1 1 0 00-1 1v9a1 1 0 001 1h7a1 1 0 001-1V5a1 1 0 00-1-1zm0 10H6V5h7v9z"/>
+			</svg>
+		</button>
+
+		<!-- New session -->
+		<button class="tb-btn" id="btn-new" title="New Session  ⌘⌥N">
+			<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+				<path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z"/>
+			</svg>
+		</button>
+
+		<span id="model-badge"></span>
 	</div>
 
 	<!-- Terminal -->
