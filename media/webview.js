@@ -60,19 +60,49 @@
 				outputBuffer = '';
 				pendingApply = null;
 				hideApplyBar();
+				setStatus(false, '', '');
+				break;
+
+			case 'sessionStarted':
+				setStatus(true, '', msg.cwd || '');
 				break;
 
 			case 'modelName':
 				var badge = document.getElementById('model-badge');
 				badge.textContent = msg.name;
 				badge.classList.add('visible');
+				document.getElementById('status-model').textContent = msg.name;
 				break;
 
 			case 'sessionEnded':
 				document.getElementById('model-badge').classList.remove('visible');
+				setStatus(false, '', '');
 				break;
 		}
 	});
+
+	// ── Status bar ─────────────────────────────────────────────────────────
+	function setStatus(active, model, cwd) {
+		var dot   = document.getElementById('status-dot');
+		var label = document.getElementById('status-label');
+		var sep   = document.getElementById('status-cwd-sep');
+		var cwdEl = document.getElementById('status-cwd');
+		if (active) {
+			dot.classList.add('active');
+			label.textContent = 'Active';
+		} else {
+			dot.classList.remove('active');
+			label.textContent = 'No session';
+			document.getElementById('status-model').textContent = '';
+		}
+		if (cwd) {
+			cwdEl.textContent = cwd;
+			sep.style.display = '';
+		} else {
+			cwdEl.textContent = '';
+			sep.style.display = 'none';
+		}
+	}
 
 	// ── ANSI strip ─────────────────────────────────────────────────────────
 	function stripAnsi(s) {

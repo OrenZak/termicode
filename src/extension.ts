@@ -251,6 +251,10 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 
 		this.write(`\x1b[90mStarting Claude Code in ${cwd}...\x1b[0m\r\n`);
 
+		// Notify status bar
+		const shortCwd = cwd.replace(os.homedir(), '~');
+		this.view?.webview.postMessage({ type: 'sessionStarted', cwd: shortCwd });
+
 		this.bridge = cp.spawn('python3', [bridgePath, claudePath, '120', '40'], {
 			cwd,
 			env: { ...process.env },
@@ -432,6 +436,34 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 			font-size: 11px;
 		}
 
+		/* ── Status bar ───────────────────────────────────────── */
+		#status-bar {
+			display: flex;
+			align-items: center;
+			gap: 5px;
+			padding: 0 10px;
+			height: 22px;
+			background: var(--vscode-sideBar-background, #252526);
+			border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, #2d2d2d);
+			flex-shrink: 0;
+			font-size: 10px;
+			color: var(--vscode-descriptionForeground, #666);
+			user-select: none;
+		}
+		#status-dot {
+			width: 6px; height: 6px;
+			border-radius: 50%;
+			background: #444;
+			flex-shrink: 0;
+			transition: background 0.3s;
+		}
+		#status-dot.active { background: #4ec9b0; box-shadow: 0 0 4px #4ec9b066; }
+		#status-label { color: var(--vscode-foreground, #ccc); font-weight: 500; }
+		.st-sep { opacity: 0.25; margin: 0 1px; }
+		#status-model { color: var(--vscode-descriptionForeground, #666); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		#status-cwd   { color: var(--vscode-descriptionForeground, #555); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+
+		/* ── Terminal ─────────────────────────────────────────── */
 		/* ── Toolbar ─────────────────────────────────────────── */
 		#toolbar {
 			display: flex;
@@ -486,14 +518,20 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 		}
 		#model-badge.visible { opacity: 1; }
 
-		/* ── Terminal ─────────────────────────────────────────── */
 		#terminal-wrap {
 			flex: 1;
 			min-height: 0;
 			position: relative;
 			overflow: hidden;
+			padding: 6px 8px 4px;
 		}
 		#terminal { width: 100%; height: 100%; }
+
+		/* thin VS Code-style scrollbar inside xterm */
+		.xterm-viewport::-webkit-scrollbar { width: 6px; }
+		.xterm-viewport::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 3px; }
+		.xterm-viewport::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.25); }
+		.xterm-viewport::-webkit-scrollbar-track { background: transparent; }
 
 		/* ── Apply bar ───────────────────────────────────────── */
 		#apply-bar {
@@ -548,6 +586,16 @@ class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 	</style>
 </head>
 <body>
+	<!-- Status bar -->
+	<div id="status-bar">
+		<span id="status-dot"></span>
+		<span id="status-label">No session</span>
+		<span class="st-sep">·</span>
+		<span id="status-model"></span>
+		<span class="st-sep" id="status-cwd-sep" style="display:none">·</span>
+		<span id="status-cwd"></span>
+	</div>
+
 	<!-- Terminal -->
 	<div id="terminal-wrap">
 		<div id="terminal"></div>
