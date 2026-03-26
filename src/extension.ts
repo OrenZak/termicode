@@ -27,6 +27,7 @@ export function activate(context: vscode.ExtensionContext) {
 		if (rel) {
 			provider?.injectText(`@${rel} `);
 			vscode.commands.executeCommand('workbench.view.extension.termicode-claude');
+			provider?.focusTerminal();
 		} else {
 			vscode.window.showWarningMessage('Termicode: No file to add (open a file first).');
 		}
@@ -45,6 +46,7 @@ export function activate(context: vscode.ExtensionContext) {
 		const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
 		provider?.injectText(`@${rel}:${lineRange} `);
 		vscode.commands.executeCommand('workbench.view.extension.termicode-claude');
+		provider?.focusTerminal();
 	});
 
 	reg('termicode.askClaude', async () => {

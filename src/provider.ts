@@ -86,6 +86,10 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 	newSession() { return this.sessionManager.newSession(); }
 	restartSession() { return this.sessionManager.restartSession(); }
 
+	focusTerminal() {
+		setTimeout(() => this.view?.webview.postMessage({ type: 'focus' }), 150);
+	}
+
 	injectText(text: string) {
 		const s = this.sessionManager.activeSession();
 		if (!s?.bridge?.stdin) {

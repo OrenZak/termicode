@@ -57,10 +57,9 @@
 
 		term.attachCustomKeyEventHandler(function (e) {
 			if (e.type === 'keydown' && e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
-				// Send modifyOtherKeys Shift+Enter sequence.
-				// Claude Code requests modifyOtherKeys mode 2 (\x1b[>4;2m) on startup.
-				// Bun's readline (which Claude Code uses) parses \x1b[27;2;13~ as Shift+Enter.
-				if (id === activeId) { vscode.postMessage({ type: 'input', data: '\x1b[27;2;13~' }); }
+				// Bracketed paste a newline — Claude Code has bracketed paste mode enabled,
+				// so \x1b[200~\n\x1b[201~ inserts a literal newline into the input without submitting.
+				if (id === activeId) { vscode.postMessage({ type: 'input', data: '\x1b[200~\n\x1b[201~' }); }
 				return false;
 			}
 			// Cmd+L (Mac) / Ctrl+L (Win/Linux): forward to VS Code instead of sending \x0c to Claude.
@@ -210,6 +209,10 @@
 
 			case 'activateTab':
 				activateSession(msg.id);
+				break;
+
+			case 'focus':
+				if (activeId && sessions[activeId]) { sessions[activeId].term.focus(); }
 				break;
 
 			case 'resetTab':
