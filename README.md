@@ -1,6 +1,10 @@
-# Termicode – Claude Code Panel
+<div align="center">
+  <img src="media/claude-icon.svg" width="100" />
+  <h1>Termicode – Claude Code Panel</h1>
+  <p>Run <a href="https://claude.ai/code">Claude Code</a> CLI as a first-class terminal panel inside VS Code's secondary sidebar.</p>
+</div>
 
-> Run [Claude Code](https://claude.ai/code) CLI as a first-class terminal panel inside VS Code's secondary sidebar.
+---
 
 No more alt-tabbing to a terminal. Termicode embeds a full Claude Code session next to your code, with multi-tab support, file/selection injection, and a real PTY so the terminal behaves exactly like your native terminal.
 
