@@ -17,6 +17,7 @@ def main():
     claude_path = sys.argv[1] if len(sys.argv) > 1 else 'claude'
     cols = int(sys.argv[2]) if len(sys.argv) > 2 else 120
     rows = int(sys.argv[3]) if len(sys.argv) > 3 else 40
+    extra_args = sys.argv[4:] if len(sys.argv) > 4 else []
 
     master, slave = pty.openpty()
     set_winsize(master, cols, rows)
@@ -37,7 +38,7 @@ def main():
         env = dict(os.environ)
         env['TERM'] = 'xterm-256color'
         env['COLORTERM'] = 'truecolor'
-        os.execvpe(claude_path, [claude_path], env)
+        os.execvpe(claude_path, [claude_path] + extra_args, env)
         os._exit(1)
 
     # Parent: bridge stdin → PTY master and PTY master → stdout

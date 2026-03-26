@@ -40,67 +40,67 @@
 			{
 				"command": "termicode.open",
 				"title": "Open Termicode Panel",
-				"category": "Claude",
+				"category": "Termicode",
 				"icon": "media/claude-icon.svg"
 			},
 			{
 				"command": "termicode.newSession",
 				"title": "New Session",
-				"category": "Claude",
+				"category": "Termicode",
 				"icon": "$(add)"
 			},
 			{
 				"command": "termicode.addFile",
 				"title": "Add Current File to Claude",
-				"category": "Claude",
+				"category": "Termicode",
 				"icon": "$(file-add)"
 			},
 			{
 				"command": "termicode.addSelection",
 				"title": "Add Selected Code to Claude",
-				"category": "Claude",
+				"category": "Termicode",
 				"icon": "$(selection)"
 			},
 			{
 				"command": "termicode.askClaude",
 				"title": "Ask Claude...",
-				"category": "Claude",
+				"category": "Termicode",
 				"icon": "$(comment)"
 			},
 			{
 				"command": "termicode.addImage",
 				"title": "Add Image to Claude",
-				"category": "Claude",
+				"category": "Termicode",
 				"icon": "$(file-media)"
 			},
 			{
 				"command": "termicode.clearContext",
 				"title": "Clear Context (/clear)",
-				"category": "Claude",
+				"category": "Termicode",
 				"icon": "$(clear-all)"
 			},
 			{
 				"command": "termicode.compactContext",
 				"title": "Compact Context (/compact)",
-				"category": "Claude",
+				"category": "Termicode",
 				"icon": "$(fold)"
 			},
 			{
 				"command": "termicode.history",
 				"title": "Session History (/resume)",
-				"category": "Claude",
+				"category": "Termicode",
 				"icon": "$(history)"
 			},
 			{
 				"command": "termicode.copyLastResponse",
 				"title": "Copy Last Response",
-				"category": "Claude",
+				"category": "Termicode",
 				"icon": "$(copy)"
 			},
 			{
 				"command": "termicode.cmdL",
 				"title": "Add Selection / Toggle Panel",
-				"category": "Claude"
+				"category": "Termicode"
 			}
 		],
 		"menus": {
@@ -231,8 +231,8 @@
 	"scripts": {
 		"build": "node esbuild.mjs",
 		"watch": "node esbuild.mjs --watch",
-		"package": "npm run build && vsce package",
-		"vscode:prepublish": "npm run build"
+		"package": "yarn build && vsce package",
+		"vscode:prepublish": "yarn build"
 	},
 	"devDependencies": {
 		"@types/node": "^22.0.0",

@@ -4,12 +4,20 @@
 
 	var vscode = acquireVsCodeApi();
 
-	// ── Per-session state ──────────────────────────────────────────────────
+	// ── STATE ──────────────────────────────────────────────────────────────
 	// sessions[id] = { term, fitAddon, el, outputBuffer, pendingApply, codeBlockTimer }
 	var sessions = {};
 	var activeId = null;
 
-	// ── xterm theme (shared) ───────────────────────────────────────────────
+	// ── THEME ──────────────────────────────────────────────────────────────
+	function termFontFamily() {
+		var s = getComputedStyle(document.body);
+		var v = function (name) { return s.getPropertyValue(name).trim(); };
+		return v('--vscode-terminal-fontFamily')
+			|| v('--vscode-editor-font-family')
+			|| '"Cascadia Code", "Cascadia Mono", Menlo, monospace';
+	}
+
 	function termTheme() {
 		var s = getComputedStyle(document.body);
 		var c = function (v) { return s.getPropertyValue(v).trim() || undefined; };
@@ -25,8 +33,8 @@
 		};
 	}
 
-	// ── Create a new terminal instance for a session ───────────────────────
-	function createSession(id, label) {
+	// ── SESSION LIFECYCLE ──────────────────────────────────────────────────
+	function createSession(id, label, isWorktree) {
 		// DOM element
 		var el = document.createElement('div');
 		el.className = 'term-instance';
@@ -37,7 +45,7 @@
 		var term = new Terminal({
 			cursorBlink: true,
 			fontSize: 13,
-			fontFamily: 'var(--vscode-editor-font-family, "Cascadia Code", Menlo, monospace)',
+			fontFamily: termFontFamily(),
 			theme: termTheme(),
 			convertEol: true,
 			scrollback: 5000,
@@ -46,6 +54,22 @@
 		term.loadAddon(fitAddon);
 		term.open(el);
 		fitAddon.fit();
+
+		term.attachCustomKeyEventHandler(function (e) {
+			if (e.type === 'keydown' && e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+				// Send modifyOtherKeys Shift+Enter sequence.
+				// Claude Code requests modifyOtherKeys mode 2 (\x1b[>4;2m) on startup.
+				// Bun's readline (which Claude Code uses) parses \x1b[27;2;13~ as Shift+Enter.
+				if (id === activeId) { vscode.postMessage({ type: 'input', data: '\x1b[27;2;13~' }); }
+				return false;
+			}
+			// Cmd+L (Mac) / Ctrl+L (Win/Linux): forward to VS Code instead of sending \x0c to Claude.
+			if (e.type === 'keydown' && e.key === 'l' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+				vscode.postMessage({ type: 'command', command: 'termicode.cmdL' });
+				return false;
+			}
+			return true;
+		});
 
 		term.onData(function (data) {
 			if (id === activeId) {
@@ -66,18 +90,18 @@
 		sessions[id] = session;
 
 		// Add tab button
-		addTab(id, label);
+		addTab(id, label, isWorktree);
 
 		return session;
 	}
 
-	// ── Tab bar ────────────────────────────────────────────────────────────
-	function addTab(id, label) {
+	// ── TAB BAR ────────────────────────────────────────────────────────────
+	function addTab(id, label, isWorktree) {
 		var tabBar = document.getElementById('tab-bar');
 		var newTabBtn = document.getElementById('btn-new-tab');
 
 		var tab = document.createElement('button');
-		tab.className = 'session-tab';
+		tab.className = 'session-tab' + (isWorktree ? ' worktree-tab' : '');
 		tab.dataset.id = id;
 
 		var dot = document.createElement('span');
@@ -85,7 +109,7 @@
 
 		var lbl = document.createElement('span');
 		lbl.className = 'tab-label';
-		lbl.textContent = label;
+		lbl.textContent = (isWorktree ? '⎇ ' : '') + label;
 
 		var cls = document.createElement('button');
 		cls.className = 'tab-close';
@@ -126,8 +150,11 @@
 		var tab = document.querySelector('.session-tab[data-id="' + id + '"]');
 		if (tab) { tab.classList.add('active'); }
 
-		// refit after becoming visible
-		setTimeout(function () { session.fitAddon.fit(); }, 30);
+		// refit after becoming visible, then sync PTY dimensions
+		setTimeout(function () {
+			session.fitAddon.fit();
+			vscode.postMessage({ type: 'resize', cols: session.term.cols, rows: session.term.rows });
+		}, 30);
 
 		// tell extension which session is active
 		vscode.postMessage({ type: 'switchTab', id: id });
@@ -157,7 +184,7 @@
 		}
 	}
 
-	// ── Resize observer ────────────────────────────────────────────────────
+	// ── RESIZE OBSERVER ────────────────────────────────────────────────────
 	new ResizeObserver(function () {
 		if (activeId && sessions[activeId]) {
 			sessions[activeId].fitAddon.fit();
@@ -166,7 +193,7 @@
 		}
 	}).observe(document.getElementById('terminal-wrap'));
 
-	// ── Messages from extension ────────────────────────────────────────────
+	// ── MESSAGE HANDLER ────────────────────────────────────────────────────
 	window.addEventListener('message', function (event) {
 		var msg = event.data;
 		var session = msg.id ? sessions[msg.id] : null;
@@ -174,7 +201,11 @@
 		switch (msg.type) {
 
 			case 'newTab':
-				createSession(msg.id, msg.label);
+				createSession(msg.id, msg.label, msg.isWorktree);
+				break;
+
+			case 'worktreeMode':
+				document.getElementById('btn-worktree').classList.toggle('active', msg.enabled);
 				break;
 
 			case 'activateTab':
@@ -241,7 +272,7 @@
 		}
 	});
 
-	// ── Status bar ─────────────────────────────────────────────────────────
+	// ── STATUS BAR ─────────────────────────────────────────────────────────
 	function setStatus(active, model, cwd) {
 		var dot   = document.getElementById('status-dot');
 		var label = document.getElementById('status-label');
@@ -260,12 +291,12 @@
 		sep.style.display = cwd ? '' : 'none';
 	}
 
-	// ── ANSI strip ─────────────────────────────────────────────────────────
+	// ── ANSI / OUTPUT BUFFER ───────────────────────────────────────────────
 	function stripAnsi(s) {
 		return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\r/g, '');
 	}
 
-	// ── Code block detection ───────────────────────────────────────────────
+	// ── CODE BLOCK DETECTION ──────────────────────────────────────────────
 	function scanForCodeBlock(session) {
 		var tick = '\x60\x60\x60';
 		var pattern = tick + '([\\w]*)\\n#\\s*([^\\n]+\\.[\\S]+)[^\\n]*\\n([\\s\\S]*?)' + tick;
@@ -307,12 +338,14 @@
 		}
 	});
 
-	// ── New tab button ─────────────────────────────────────────────────────
+	// ── APPLY BAR ──────────────────────────────────────────────────────────
+
+	// ── EVENT BINDINGS ─────────────────────────────────────────────────────
 	document.getElementById('btn-new-tab').addEventListener('click', function () {
 		vscode.postMessage({ type: 'command', command: 'termicode.newSession' });
 	});
 
-	// ── Toolbar buttons ────────────────────────────────────────────────────
+	// ── TOOLBAR BUTTONS ────────────────────────────────────────────────────
 	var cmdMap = {
 		'btn-addFile':  'termicode.addFile',
 		'btn-addImage': 'termicode.addImage',
@@ -320,6 +353,7 @@
 		'btn-compact':  'termicode.compactContext',
 		'btn-history':  'termicode.history',
 		'btn-copy':     'termicode.copyLastResponse',
+		'btn-plan':     'termicode.viewPlan',
 	};
 	Object.keys(cmdMap).forEach(function (id) {
 		var el = document.getElementById(id);
@@ -330,7 +364,12 @@
 		}
 	});
 
-	// ── Image drag & drop ──────────────────────────────────────────────────
+	// ── WORKTREE TOGGLE ────────────────────────────────────────────────────
+	document.getElementById('btn-worktree').addEventListener('click', function () {
+		vscode.postMessage({ type: 'toggleWorktree' });
+	});
+
+	// ── IMAGE DRAG & DROP ──────────────────────────────────────────────────
 	var termWrap = document.getElementById('terminal-wrap');
 	var overlay  = document.getElementById('drag-overlay');
 	var dragCounter = 0;
@@ -356,6 +395,6 @@
 		}
 	});
 
-	// ── Boot ──────────────────────────────────────────────────────────────
+	// ── BOOT ──────────────────────────────────────────────────────────────
 	vscode.postMessage({ type: 'ready' });
 })();

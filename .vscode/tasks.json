@@ -4,19 +4,24 @@
 		{
 			"label": "build",
 			"type": "shell",
-			"command": "npm run build",
+			"command": "node esbuild.mjs",
 			"group": { "kind": "build", "isDefault": true },
 			"presentation": { "reveal": "silent" },
-			"problemMatcher": "$esbuild"
+			"problemMatcher": []
 		},
 		{
 			"label": "watch",
 			"type": "shell",
-			"command": "npm run watch",
+			"command": "node esbuild.mjs --watch",
 			"group": "build",
 			"isBackground": true,
 			"presentation": { "reveal": "silent" },
-			"problemMatcher": "$esbuild-watch"
+			"problemMatcher": [
+				{
+					"pattern": { "regexp": "^(.*):(\\d+):(\\d+): (error|warning): (.*)$", "file": 1, "line": 2, "column": 3, "severity": 4, "message": 5 },
+					"background": { "activeOnStart": true, "beginsPattern": "Watching for changes", "endsPattern": "Watching for changes" }
+				}
+			]
 		}
 	]
 }
