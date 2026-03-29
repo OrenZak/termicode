@@ -227,6 +227,13 @@ export class SessionManager {
 		}
 	}
 
+	renameSession(id: string, label: string): void {
+		const s = this.sessions.get(id);
+		if (!s) { return; }
+		s.label = label;
+		this.persistSessions();
+	}
+
 	toggleWorktreeMode(): boolean {
 		this._worktreeMode = !this._worktreeMode;
 		return this._worktreeMode;
