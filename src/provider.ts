@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { SessionManager } from './sessionManager';
 import { BridgeManager } from './bridgeManager';
-import { applyCodeToFile, copyLastResponse, resolveDroppedImage, writePlanMd } from './features';
+import { applyCodeToFile, copyLastResponse, resolveDroppedImage } from './features';
 import { getNonce } from './utils';
 
 type WebviewMessage =
@@ -113,14 +113,6 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 	async copyLastResponse() {
 		const s = this.sessionManager.activeSession();
 		await copyLastResponse(s?.responseBuffer ?? '');
-	}
-
-	async viewPlan() {
-		const s = this.sessionManager.activeSession();
-		if (!s) { vscode.window.showWarningMessage('Termicode: No active session.'); return; }
-		const uri = writePlanMd(s.responseBuffer, s.id);
-		if (!uri) { vscode.window.showInformationMessage('Termicode: No response to preview yet.'); return; }
-		await vscode.commands.executeCommand('markdown.showPreview', uri);
 	}
 
 	// -------------------------------------------------------------------------

@@ -87,7 +87,6 @@ export function activate(context: vscode.ExtensionContext) {
 	reg('termicode.compactContext',   () => provider?.injectText('/compact\r'));
 	reg('termicode.history',          () => provider?.injectText('/resume\r'));
 	reg('termicode.copyLastResponse', () => provider?.copyLastResponse());
-	reg('termicode.viewPlan',         () => provider?.viewPlan());
 
 	reg('termicode.cmdL', () => {
 		const editor = vscode.window.activeTextEditor

@@ -13,9 +13,6 @@ export interface Session {
 	cwd: string;
 	label: string;
 	worktreePath?: string;
-	planMdPath?: string;
-	planShown: boolean;
-	planTimer?: ReturnType<typeof setTimeout>;
 	cols?: number;
 	rows?: number;
 }
@@ -74,7 +71,6 @@ export class SessionManager {
 			id, cwd: data.cwd, label: data.label,
 			startupBuffer: '', modelParsed: false, responseBuffer: '',
 			worktreePath: data.worktreePath,
-			planShown: false,
 		};
 		this.sessions.set(id, session);
 		this._activeSessionId = id;
@@ -128,7 +124,6 @@ export class SessionManager {
 			id, cwd, label,
 			startupBuffer: '', modelParsed: false, responseBuffer: '',
 			worktreePath,
-			planShown: false,
 		};
 		this.sessions.set(id, session);
 		this._activeSessionId = id;
@@ -191,8 +186,6 @@ export class SessionManager {
 			if (s) {
 				if (msg.data.includes('\r')) {
 					s.responseBuffer = '';
-					s.planShown = false;
-					clearTimeout(s.planTimer);
 				}
 				s.bridge?.stdin?.write(msg.data);
 			}
