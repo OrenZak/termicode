@@ -19,7 +19,8 @@ Create a GitHub pull request for the current branch. Follow these steps:
    - **Test plan**: reflect the actual work done — mark items as `- [x]` if they were already verified during the work (e.g., build passed, manual testing done), leave `- [ ]` for things the reviewer should check
 6. Push the branch if not already pushed: `git push -u origin HEAD`
 7. Create the PR with `gh pr create`
-8. Return the PR URL
+8. Open the PR in the browser with `gh pr view --web`
+9. Return the PR URL
 
 Use HEREDOC syntax to pass the body:
 ```
