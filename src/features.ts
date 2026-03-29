@@ -1,32 +1,7 @@
 import * as vscode from 'vscode';
-import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { stripAnsi } from './utils';
-
-export function looksLikePlan(responseBuffer: string): boolean {
-	const plain = stripAnsi(responseBuffer);
-	if (plain.length < 200) { return false; }
-	const hasNumberedSteps = (plain.match(/^\s*\d+[.)]\s+\S/mg) || []).length >= 2;
-	const hasPlanKeyword = /\b(here'?s?\s+(my\s+)?plan|i\s+(will|'?ll)\s+|steps?\s+to\s+)/i.test(plain);
-	return hasNumberedSteps || hasPlanKeyword;
-}
-
-export function writePlanMd(responseBuffer: string, sessionId: string): vscode.Uri | null {
-	const plain = stripAnsi(responseBuffer)
-		.replace(/\r\n/g, '\n')
-		.replace(/\r/g, '\n')
-		.trim();
-	if (!plain) { return null; }
-	const mdPath = path.join(os.tmpdir(), `termicode-plan-${sessionId}.md`);
-	fs.writeFileSync(mdPath, plain, 'utf8');
-	return vscode.Uri.file(mdPath);
-}
-
-export async function openPlanPreview(responseBuffer: string, sessionId: string): Promise<void> {
-	const uri = writePlanMd(responseBuffer, sessionId);
-	if (uri) { await vscode.commands.executeCommand('markdown.showPreview', uri); }
-}
 
 export async function copyLastResponse(responseBuffer: string): Promise<void> {
 	const plain = stripAnsi(responseBuffer).trim();

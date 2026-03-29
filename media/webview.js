@@ -413,7 +413,6 @@
 		'btn-compact':  'termicode.compactContext',
 		'btn-history':  'termicode.history',
 		'btn-copy':     'termicode.copyLastResponse',
-		'btn-plan':     'termicode.viewPlan',
 	};
 	Object.keys(cmdMap).forEach(function (id) {
 		var el = document.getElementById(id);

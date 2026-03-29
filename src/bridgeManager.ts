@@ -4,7 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { stripAnsi, parseModelName } from './utils';
-import { looksLikePlan, openPlanPreview } from './features';
 import type { Session } from './sessionManager';
 
 export class BridgeManager {
@@ -73,16 +72,7 @@ export class BridgeManager {
 				}
 			}
 
-			if (!session.planShown) {
-				clearTimeout(session.planTimer);
-				session.planTimer = setTimeout(async () => {
-					if (!session.planShown && looksLikePlan(session.responseBuffer)) {
-						session.planShown = true;
-						await openPlanPreview(session.responseBuffer, session.id);
-					}
-				}, 800);
-			}
-		});
+			});
 
 		session.bridge.stderr?.on('data', (chunk: Buffer) => {
 			this.postMessage({ type: 'write', id: session.id, data: chunk.toString('utf8') });
