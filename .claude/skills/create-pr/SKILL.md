@@ -22,6 +22,10 @@ Create a GitHub pull request for the current branch. Follow these steps:
 8. Open the PR in the browser with `gh pr view --web`
 9. Return the PR URL
 
+> **Merging:** always use squash merge so the merge commit follows the conventional title.
+> In the GitHub UI: select "Squash and merge" and set the commit message to match the PR title (`type: description`).
+> Via CLI: `gh pr merge --squash --subject "type: description"`
+
 Use HEREDOC syntax to pass the body:
 ```
 gh pr create --title "type: description" --body "$(cat <<'EOF'
