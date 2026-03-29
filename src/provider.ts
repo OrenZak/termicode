@@ -15,7 +15,8 @@ type WebviewMessage =
 	| { type: 'closeTab'; id: string }
 	| { type: 'applyCode'; filepath: string; code: string }
 	| { type: 'dropImage'; name: string }
-	| { type: 'toggleWorktree' };
+	| { type: 'toggleWorktree' }
+	| { type: 'renameTab'; id: string; label: string };
 
 export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 
@@ -72,6 +73,9 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 					this.view?.webview.postMessage({ type: 'worktreeMode', enabled });
 					break;
 				}
+				case 'renameTab':
+					this.sessionManager.renameSession(msg.id, msg.label);
+					break;
 			}
 		});
 

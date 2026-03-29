@@ -124,9 +124,62 @@
 		tab.appendChild(lbl);
 		tab.appendChild(cls);
 		tab.addEventListener('click', function () { activateSession(id); });
+		tab.addEventListener('contextmenu', function (e) {
+			e.preventDefault();
+			startRename(id);
+		});
 
 		tabBar.insertBefore(tab, newTabBtn);
 		activateSession(id);
+	}
+
+	function startRename(id) {
+		var tab = document.querySelector('.session-tab[data-id="' + id + '"]');
+		if (!tab || tab.querySelector('.tab-rename-input')) { return; }
+		var lbl = tab.querySelector('.tab-label');
+		if (!lbl) { return; }
+
+		var isWorktree = tab.classList.contains('worktree-tab');
+		var current = lbl.textContent.replace(/^⎇\s*/, '');
+
+		var input = document.createElement('input');
+		input.type = 'text';
+		input.className = 'tab-rename-input';
+		input.value = current;
+		lbl.replaceWith(input);
+		input.focus();
+		input.select();
+
+		var committed = false;
+		function confirm() {
+			var newLabel = input.value.trim() || current;
+			var newLbl = document.createElement('span');
+			newLbl.className = 'tab-label';
+			newLbl.textContent = (isWorktree ? '⎇ ' : '') + newLabel;
+			input.replaceWith(newLbl);
+			vscode.postMessage({ type: 'renameTab', id: id, label: newLabel });
+		}
+		function cancel() {
+			var newLbl = document.createElement('span');
+			newLbl.className = 'tab-label';
+			newLbl.textContent = (isWorktree ? '⎇ ' : '') + current;
+			input.replaceWith(newLbl);
+		}
+		input.addEventListener('keydown', function (e) {
+			if (e.key === 'Enter')  { e.preventDefault(); committed = true; confirm(); }
+			if (e.key === 'Escape') { e.preventDefault(); committed = true; cancel(); }
+		});
+		input.addEventListener('blur', function () {
+			if (!committed) { committed = true; confirm(); }
+		});
+	}
+
+	function renameTab(id, label) {
+		var tab = document.querySelector('.session-tab[data-id="' + id + '"]');
+		if (!tab) { return; }
+		var isWorktree = tab.classList.contains('worktree-tab');
+		var lbl = tab.querySelector('.tab-label');
+		if (lbl) { lbl.textContent = (isWorktree ? '⎇ ' : '') + label; }
 	}
 
 	function activateSession(id) {
@@ -209,6 +262,10 @@
 
 			case 'activateTab':
 				activateSession(msg.id);
+				break;
+
+			case 'renameTab':
+				renameTab(msg.id, msg.label);
 				break;
 
 			case 'focus':
