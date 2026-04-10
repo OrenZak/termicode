@@ -45,8 +45,12 @@ export class BridgeManager {
 		session.bridge.stdout?.on('data', (chunk: Buffer) => {
 			const text = chunk.toString('utf8');
 
-			// If --continue fails, restart as a fresh session
-			if (extraArgs.includes('--continue') && stripAnsi(text).includes('No conversation found to continue')) {
+			// If --continue/--resume fails, restart as a fresh session
+			const plain = stripAnsi(text);
+			const resumeFailed =
+				(extraArgs.includes('--continue') && plain.includes('No conversation found to continue')) ||
+				(extraArgs.includes('--resume') && plain.includes('No conversation found'));
+			if (resumeFailed) {
 				session.bridge?.kill();
 				setTimeout(() => {
 					session.bridge = undefined;
@@ -54,7 +58,7 @@ export class BridgeManager {
 					session.modelParsed = false;
 					session.responseBuffer = '';
 					this.postMessage({ type: 'resetTab', id: session.id });
-					this.startBridge(session, extraArgs.filter(a => a !== '--continue'));
+					this.startBridge(session, extraArgs.filter(a => a !== '--continue' && a !== '--resume' && a !== session.claudeSessionId));
 				}, 100);
 				return;
 			}

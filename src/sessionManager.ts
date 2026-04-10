@@ -1,11 +1,13 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
+import * as crypto from 'crypto';
 import * as os from 'os';
 import * as path from 'path';
 import { execPromise } from './utils';
 
 export interface Session {
 	id: string;
+	claudeSessionId?: string;
 	bridge?: cp.ChildProcess;
 	startupBuffer: string;
 	modelParsed: boolean;
@@ -20,6 +22,7 @@ export interface Session {
 interface SavedSessionData {
 	cwd: string;
 	label: string;
+	claudeSessionId?: string;
 	worktreePath?: string;
 }
 
@@ -71,12 +74,16 @@ export class SessionManager {
 			id, cwd: data.cwd, label: data.label,
 			startupBuffer: '', modelParsed: false, responseBuffer: '',
 			worktreePath: data.worktreePath,
+			claudeSessionId: data.claudeSessionId,
 		};
 		this.sessions.set(id, session);
 		this._activeSessionId = id;
 
 		this.postMessage({ type: 'newTab', id, label: data.label, isWorktree: !!data.worktreePath });
-		this.queueSession(session, ['--continue']);
+		const extraArgs = data.claudeSessionId
+			? ['--resume', data.claudeSessionId]
+			: ['--continue'];
+		this.queueSession(session, extraArgs);
 	}
 
 	async newSession(): Promise<void> {
@@ -120,16 +127,17 @@ export class SessionManager {
 			worktreePath = wtPath;
 		}
 
+		const claudeSessionId = crypto.randomUUID();
 		const session: Session = {
 			id, cwd, label,
 			startupBuffer: '', modelParsed: false, responseBuffer: '',
-			worktreePath,
+			worktreePath, claudeSessionId,
 		};
 		this.sessions.set(id, session);
 		this._activeSessionId = id;
 
 		this.postMessage({ type: 'newTab', id, label, isWorktree: !!worktreePath });
-		this.queueSession(session, []);
+		this.queueSession(session, ['--session-id', claudeSessionId]);
 		this.persistSessions();
 	}
 
@@ -243,6 +251,7 @@ export class SessionManager {
 		const data: SavedSessionData[] = [...this.sessions.values()].map(s => ({
 			cwd: s.cwd,
 			label: s.label,
+			claudeSessionId: s.claudeSessionId,
 			worktreePath: s.worktreePath,
 		}));
 		this.context.workspaceState.update(SAVED_SESSIONS_KEY, data.length > 0 ? data : undefined);
