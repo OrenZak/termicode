@@ -36,6 +36,7 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 		_token: vscode.CancellationToken
 	) {
 		this.view = webviewView;
+		const version = this.context.extension.packageJSON.version as string;
 		webviewView.webview.options = {
 			enableScripts: true,
 			localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')],
@@ -45,6 +46,7 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 		webviewView.webview.onDidReceiveMessage(async (msg: WebviewMessage) => {
 			switch (msg.type) {
 				case 'ready':
+					webviewView.webview.postMessage({ type: 'version', value: version });
 					await this.sessionManager.initSessions();
 					break;
 				case 'input':

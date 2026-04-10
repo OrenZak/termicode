@@ -307,6 +307,10 @@
 				}
 				break;
 
+			case 'version':
+				document.getElementById('tab-version').textContent = 'v' + msg.value;
+				break;
+
 			case 'modelName':
 				if (session) {
 					var tab2 = document.querySelector('.session-tab[data-id="' + msg.id + '"] .tab-label');
