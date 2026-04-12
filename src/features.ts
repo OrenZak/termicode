@@ -18,7 +18,7 @@ export async function applyCodeToFile(filepath: string, code: string): Promise<v
 	const absPath = root ? path.resolve(root, filepath) : path.resolve(filepath);
 	const uri = vscode.Uri.file(absPath);
 	const answer = await vscode.window.showInformationMessage(
-		`Apply Claude's code to ${path.basename(filepath)}?`,
+		`Apply suggested code to ${path.basename(filepath)}?`,
 		{ modal: true }, 'Apply', 'Open Diff'
 	);
 	if (answer === 'Apply') {
@@ -29,7 +29,7 @@ export async function applyCodeToFile(filepath: string, code: string): Promise<v
 		let existingUri = uri;
 		try { fs.accessSync(absPath); } catch { existingUri = vscode.Uri.parse('untitled:empty'); }
 		const proposed = await vscode.workspace.openTextDocument({ content: code });
-		await vscode.commands.executeCommand('vscode.diff', existingUri, proposed.uri, `${path.basename(filepath)}: Current ↔ Claude`);
+		await vscode.commands.executeCommand('vscode.diff', existingUri, proposed.uri, `${path.basename(filepath)}: Current ↔ Suggested`);
 	}
 }
 

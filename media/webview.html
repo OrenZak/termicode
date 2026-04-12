@@ -31,14 +31,20 @@
 			scrollbar-width: none;
 		}
 		#tab-bar::-webkit-scrollbar { display: none; }
-		#tab-version {
+		#tab-actions {
+			display: flex;
+			align-items: center;
+			flex-shrink: 0;
 			margin-left: auto;
-			padding: 0 10px;
+			border-left: 1px solid var(--vscode-editorGroupHeader-tabsBorder, #252526);
+			background: var(--vscode-editorGroupHeader-tabsBackground, #2d2d2d);
+		}
+		#tab-version {
+			padding: 0 10px 0 8px;
 			font-size: 11px;
 			color: var(--vscode-descriptionForeground, #888);
 			display: flex;
 			align-items: center;
-			flex-shrink: 0;
 			user-select: none;
 		}
 
@@ -79,6 +85,23 @@
 			overflow: hidden;
 			text-overflow: ellipsis;
 		}
+		.tab-provider {
+			display: inline-flex;
+			align-items: center;
+			padding: 0 5px;
+			height: 16px;
+			border-radius: 999px;
+			background: rgba(255,255,255,.08);
+			color: var(--vscode-descriptionForeground, #999);
+			font-size: 9px;
+			text-transform: uppercase;
+			letter-spacing: 0.35px;
+			flex-shrink: 0;
+		}
+		.session-tab.active .tab-provider {
+			background: rgba(255,255,255,.12);
+			color: var(--vscode-foreground, #ddd);
+		}
 		.tab-rename-input {
 			flex: 1;
 			min-width: 0;
@@ -112,19 +135,38 @@
 		.session-tab.active .tab-close { opacity: 0.6; }
 		.tab-close:hover { opacity: 1 !important; background: rgba(255,255,255,.1); }
 
-		#btn-new-tab {
+		.tab-action-btn {
 			display: inline-flex;
 			align-items: center;
 			justify-content: center;
-			width: 35px;
+			min-width: 34px;
+			padding: 0 8px;
 			border: none;
+			border-right: 1px solid var(--vscode-editorGroupHeader-tabsBorder, #252526);
 			background: transparent;
 			color: var(--vscode-tab-inactiveForeground, #666);
 			cursor: pointer;
-			font-size: 18px;
+			font-size: 11px;
+			font-weight: 600;
+			letter-spacing: 0.3px;
 			flex-shrink: 0;
+			text-transform: uppercase;
 		}
-		#btn-new-tab:hover { color: var(--vscode-foreground, #fff); background: rgba(255,255,255,.05); }
+		.tab-action-btn:hover { color: var(--vscode-foreground, #fff); background: rgba(255,255,255,.05); }
+		#btn-new-tab {
+			font-size: 18px;
+			font-weight: 500;
+			padding: 0 10px;
+			letter-spacing: 0;
+			text-transform: none;
+		}
+		#btn-new-default-tab {
+			font-size: 10px;
+		}
+		#btn-set-default-provider {
+			font-size: 10px;
+			color: var(--vscode-descriptionForeground, #8d8d8d);
+		}
 
 		/* ── Status bar ───────────────────────────────────────── */
 		#status-bar {
@@ -149,6 +191,20 @@
 		}
 		#status-dot.active { background: #4ec9b0; box-shadow: 0 0 4px #4ec9b066; }
 		#status-label { color: var(--vscode-foreground, #ccc); font-weight: 500; }
+		#status-provider {
+			padding: 0 5px;
+			border-radius: 999px;
+			background: rgba(255,255,255,.06);
+			color: var(--vscode-descriptionForeground, #888);
+			font-size: 9px;
+			text-transform: uppercase;
+			letter-spacing: 0.35px;
+			max-width: 84px;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+		#status-provider:empty { display: none; }
 		.st-sep { opacity: 0.25; margin: 0 1px; }
 		#status-model { color: var(--vscode-descriptionForeground, #666); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		#status-cwd   { color: var(--vscode-descriptionForeground, #555); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -247,6 +303,12 @@
 		.tb-btn svg { display: block; pointer-events: none; }
 		.tb-btn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,.1)); color: var(--vscode-foreground, #fff); }
 		.tb-btn:active { background: var(--vscode-toolbar-activeBackground, rgba(255,255,255,.18)); }
+		.tb-btn.disabled,
+		.tb-btn:disabled {
+			opacity: 0.35;
+			cursor: default;
+			pointer-events: none;
+		}
 		.tb-btn.danger:hover { color: var(--vscode-errorForeground, #f48771); }
 		.tb-sep {
 			width: 1px; height: 16px;
@@ -286,14 +348,19 @@
 
 	<!-- Session tab bar -->
 	<div id="tab-bar">
-		<button id="btn-new-tab" title="New Claude Session  ⌘⌥N">+</button>
-		<span id="tab-version"></span>
+		<div id="tab-actions">
+			<button class="tab-action-btn" id="btn-new-tab" title="New Session (Choose Provider)">+</button>
+			<button class="tab-action-btn" id="btn-new-default-tab" title="New Session with Default Provider  ⌘⌥N">+DEF</button>
+			<button class="tab-action-btn" id="btn-set-default-provider" title="Set Default Provider">DEF</button>
+			<span id="tab-version"></span>
+		</div>
 	</div>
 
 	<!-- Status bar -->
 	<div id="status-bar">
 		<span id="status-dot"></span>
 		<span id="status-label">No session</span>
+		<span id="status-provider"></span>
 		<span class="st-sep">·</span>
 		<span id="status-model"></span>
 		<span class="st-sep" id="status-cwd-sep" style="display:none">·</span>
@@ -302,12 +369,12 @@
 
 	<!-- Terminal area (multiple instances stacked) -->
 	<div id="terminal-wrap">
-		<div id="drag-overlay">Drop image to add to Claude</div>
+		<div id="drag-overlay">Drop image to add to the active agent</div>
 	</div>
 
 	<!-- Apply code bar -->
 	<div id="apply-bar">
-		<span>Claude suggests changes to</span>
+		<span>Suggested changes for</span>
 		<span id="apply-file"></span>
 		<button id="btn-apply">Apply</button>
 		<button id="btn-apply-diff">Diff</button>

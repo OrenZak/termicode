@@ -1,10 +1,20 @@
 import * as vscode from 'vscode';
+import * as cp from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { SessionManager } from './sessionManager';
 import { BridgeManager } from './bridgeManager';
 import { applyCodeToFile, copyLastResponse, resolveDroppedImage } from './features';
 import { getNonce } from './utils';
+import {
+	getProvider,
+	getProviderActionCommand,
+	isProviderId,
+	listProviders,
+	type ProviderAction,
+	type ProviderId,
+} from './providers';
 
 type WebviewMessage =
 	| { type: 'ready' }
@@ -18,15 +28,22 @@ type WebviewMessage =
 	| { type: 'toggleWorktree' }
 	| { type: 'renameTab'; id: string; label: string };
 
-export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
+export class TermicodeViewProvider implements vscode.WebviewViewProvider {
 
 	private view?: vscode.WebviewView;
 	private sessionManager: SessionManager;
 	private bridgeManager: BridgeManager;
+	private readonly outputChannel: vscode.OutputChannel;
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 		const postMessage = (msg: any) => this.view?.webview.postMessage(msg);
-		this.bridgeManager = new BridgeManager(context, postMessage);
+		this.outputChannel = vscode.window.createOutputChannel('Termicode');
+		this.context.subscriptions.push(this.outputChannel);
+		this.bridgeManager = new BridgeManager(
+			context,
+			postMessage,
+			(sessionId, resumeToken) => this.sessionManager.setResumeToken(sessionId, resumeToken),
+		);
 		this.sessionManager = new SessionManager(context, postMessage, (session, extraArgs) => this.bridgeManager.startBridge(session, extraArgs));
 	}
 
@@ -89,7 +106,60 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 	// -------------------------------------------------------------------------
 	// Public API (called from extension.ts commands)
 
-	newSession() { return this.sessionManager.newSession(); }
+	async newSession(): Promise<boolean> {
+		const providerId = this.getDefaultProviderId() ?? await this.pickProvider();
+		if (!providerId) { return false; }
+		if (!await this.ensureProviderAvailable(providerId)) { return false; }
+		await this.sessionManager.newSession(providerId);
+		return true;
+	}
+
+	async newSessionWithPicker(): Promise<boolean> {
+		const providerId = await this.pickProvider();
+		if (!providerId) { return false; }
+		if (!await this.ensureProviderAvailable(providerId)) { return false; }
+		await this.sessionManager.newSession(providerId);
+		return true;
+	}
+
+	async newSessionWithProvider(providerId: ProviderId): Promise<boolean> {
+		if (!await this.ensureProviderAvailable(providerId)) { return false; }
+		await this.sessionManager.newSession(providerId);
+		return true;
+	}
+
+	async chooseDefaultProvider(): Promise<void> {
+		const current = this.getConfiguredDefaultProviderRaw();
+		const items = [
+			{
+				label: 'Always Ask',
+				description: 'Show the provider picker for every new session',
+				value: 'prompt',
+			},
+			...listProviders().map((provider) => ({
+				label: provider.shortLabel,
+				description: provider.label,
+				detail: `Use ${provider.shortLabel} for the + button and new-session shortcut`,
+				value: provider.id,
+			})),
+		];
+		const picked = await vscode.window.showQuickPick(items, {
+			placeHolder: 'Choose the default provider for new sessions',
+			matchOnDescription: true,
+			matchOnDetail: true,
+		});
+		if (!picked) { return; }
+
+		await vscode.workspace.getConfiguration('termicode').update(
+			'defaultProvider',
+			picked.value,
+			vscode.ConfigurationTarget.Global,
+		);
+
+		const label = picked.value === 'prompt' ? 'Always Ask' : getProvider(picked.value as ProviderId).label;
+		vscode.window.showInformationMessage(`Termicode: Default provider set to ${label}.`);
+	}
+
 	restartSession() { return this.sessionManager.restartSession(); }
 
 	focusTerminal() {
@@ -99,10 +169,34 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 	injectText(text: string) {
 		const s = this.sessionManager.activeSession();
 		if (!s?.bridge?.stdin) {
-			vscode.window.showWarningMessage('Termicode: No active Claude session.');
+			vscode.window.showWarningMessage('Termicode: No active session.');
 			return;
 		}
 		s.bridge.stdin.write(text);
+	}
+
+	runProviderAction(action: ProviderAction): void {
+		const session = this.sessionManager.activeSession();
+		if (!session) {
+			vscode.window.showWarningMessage('Termicode: No active session.');
+			return;
+		}
+
+		const command = getProviderActionCommand(session.providerId, action);
+		if (!command) {
+			const provider = getProvider(session.providerId);
+			vscode.window.showInformationMessage(
+				`Termicode: ${provider.label} does not expose a ${action} action in the panel yet.`
+			);
+			return;
+		}
+
+		this.injectText(command);
+	}
+
+	getActiveProviderLabel(): string | undefined {
+		const session = this.sessionManager.activeSession();
+		return session ? getProvider(session.providerId).shortLabel : undefined;
 	}
 
 	getRelativePath(fileUri?: vscode.Uri): string | undefined {
@@ -135,5 +229,140 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 			.replace('{{XTERM_JS}}', uri('xterm.js'))
 			.replace('{{FIT_ADDON_JS}}', uri('xterm-addon-fit.js'))
 			.replace('{{WEBVIEW_JS}}', uri('webview.js'));
+	}
+
+	private async pickProvider(): Promise<ProviderId | undefined> {
+		const items = listProviders().map((provider) => ({
+			label: provider.shortLabel,
+			description: provider.label,
+			detail: `Run ${provider.executableName} in a dedicated Termicode tab`,
+			providerId: provider.id,
+		}));
+		const picked = await vscode.window.showQuickPick(items, {
+			placeHolder: 'Choose an AI coding agent for the new session',
+			matchOnDescription: true,
+			matchOnDetail: true,
+		});
+		return picked?.providerId;
+	}
+
+	private getDefaultProviderId(): ProviderId | undefined {
+		const value = this.getConfiguredDefaultProviderRaw();
+		return isProviderId(value) ? value : undefined;
+	}
+
+	private getConfiguredDefaultProviderRaw(): string {
+		return vscode.workspace.getConfiguration('termicode').get<string>('defaultProvider', 'prompt');
+	}
+
+	private async ensureProviderAvailable(providerId: ProviderId): Promise<boolean> {
+		const provider = getProvider(providerId);
+		const resolution = this.bridgeManager.resolveProviderExecutable(providerId);
+		if (resolution.commandPath) {
+			return true;
+		}
+
+		const settingName = `termicode.${provider.settingKey}`;
+		const message = resolution.configuredPath && !resolution.configuredPathValid
+			? `${provider.label} is configured to use "${resolution.configuredPath}", but that file does not exist. Install ${provider.shortLabel} now?`
+			: `${provider.label} is not installed. Install it now before opening the session?`;
+		const choice = await vscode.window.showWarningMessage(
+			message,
+			{ modal: true },
+			'Install',
+			'Open Settings',
+			'Open Docs',
+		);
+
+		if (choice === 'Open Settings') {
+			await vscode.commands.executeCommand('workbench.action.openSettings', settingName);
+			return false;
+		}
+
+		if (choice === 'Open Docs') {
+			await vscode.env.openExternal(vscode.Uri.parse(provider.docsUrl));
+			return false;
+		}
+
+		if (choice !== 'Install') {
+			return false;
+		}
+
+		const installed = await this.installProvider(providerId);
+		if (!installed) {
+			return false;
+		}
+
+		const updatedResolution = this.bridgeManager.resolveProviderExecutable(providerId);
+		if (!updatedResolution.commandPath) {
+			vscode.window.showErrorMessage(
+				`Termicode: ${provider.label} still isn't available after install. Check ${settingName} or your PATH.`
+			);
+			return false;
+		}
+
+		return true;
+	}
+
+	private async installProvider(providerId: ProviderId): Promise<boolean> {
+		const provider = getProvider(providerId);
+		const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
+		this.outputChannel.clear();
+		this.outputChannel.show(true);
+		this.outputChannel.appendLine(`Installing ${provider.label}...`);
+		this.outputChannel.appendLine(`$ ${provider.installCommand}`);
+
+		try {
+			await vscode.window.withProgress(
+				{
+					location: vscode.ProgressLocation.Notification,
+					title: `Installing ${provider.label}`,
+				},
+				() => this.runShellCommand(provider.installCommand, cwd),
+			);
+			vscode.window.showInformationMessage(`Termicode: ${provider.label} installed successfully.`);
+			return true;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.outputChannel.appendLine('');
+			this.outputChannel.appendLine(`Install failed: ${message}`);
+			const choice = await vscode.window.showErrorMessage(
+				`Termicode: Failed to install ${provider.label}. See the Termicode output for details.`,
+				'Open Output',
+				'Open Docs',
+			);
+			if (choice === 'Open Output') {
+				this.outputChannel.show(true);
+			} else if (choice === 'Open Docs') {
+				await vscode.env.openExternal(vscode.Uri.parse(provider.docsUrl));
+			}
+			return false;
+		}
+	}
+
+	private runShellCommand(command: string, cwd: string): Promise<void> {
+		return new Promise((resolve, reject) => {
+			const child = cp.exec(command, {
+				cwd,
+				env: { ...process.env },
+				maxBuffer: 10 * 1024 * 1024,
+			});
+
+			child.stdout?.on('data', (chunk: string | Buffer) => {
+				this.outputChannel.append(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+			});
+			child.stderr?.on('data', (chunk: string | Buffer) => {
+				this.outputChannel.append(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+			});
+
+			child.on('error', reject);
+			child.on('exit', (code) => {
+				if (code === 0) {
+					resolve();
+				} else {
+					reject(new Error(`Command exited with code ${code}`));
+				}
+			});
+		});
 	}
 }

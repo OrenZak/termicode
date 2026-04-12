@@ -1,7 +1,7 @@
 {
 	"name": "termicode",
-	"displayName": "Termicode – Claude Code Panel",
-	"description": "Run Claude Code CLI as a first-class terminal panel in the secondary sidebar",
+	"displayName": "Termicode – AI Agent Panel",
+	"description": "Run AI coding agents like Claude, Codex, Cursor, and Gemini as a first-class terminal panel in the secondary sidebar",
 	"version": "0.2.0",
 	"publisher": "termicode",
 	"license": "MIT",
@@ -16,6 +16,10 @@
 		"claude",
 		"claude code",
 		"anthropic",
+		"codex",
+		"cursor",
+		"gemini",
+		"ai agent",
 		"ai",
 		"terminal"
 	],
@@ -42,7 +46,7 @@
 				{
 					"type": "webview",
 					"id": "termicode.terminal",
-					"name": "Termicode – Claude Code",
+					"name": "Termicode – AI Agents",
 					"retainContextWhenHidden": true
 				}
 			]
@@ -56,31 +60,49 @@
 			},
 			{
 				"command": "termicode.newSession",
-				"title": "New Session",
+				"title": "New Default Session",
+				"category": "Termicode",
+				"icon": {
+					"light": "media/icon-default-session-light.svg",
+					"dark": "media/icon-default-session-dark.svg"
+				}
+			},
+			{
+				"command": "termicode.newProviderSession",
+				"title": "New Session (Choose Provider)...",
 				"category": "Termicode",
 				"icon": "$(add)"
 			},
 			{
+				"command": "termicode.setDefaultProvider",
+				"title": "Set Default Provider...",
+				"category": "Termicode",
+				"icon": {
+					"light": "media/icon-set-default-light.svg",
+					"dark": "media/icon-set-default-dark.svg"
+				}
+			},
+			{
 				"command": "termicode.addFile",
-				"title": "Add Current File to Claude",
+				"title": "Add Current File to Active Agent",
 				"category": "Termicode",
 				"icon": "$(file-add)"
 			},
 			{
 				"command": "termicode.addSelection",
-				"title": "Add Selected Code to Claude",
+				"title": "Add Selected Code to Active Agent",
 				"category": "Termicode",
 				"icon": "$(selection)"
 			},
 			{
 				"command": "termicode.askClaude",
-				"title": "Ask Claude...",
+				"title": "Ask Active Agent...",
 				"category": "Termicode",
 				"icon": "$(comment)"
 			},
 			{
 				"command": "termicode.addImage",
-				"title": "Add Image to Claude",
+				"title": "Add Image to Active Agent",
 				"category": "Termicode",
 				"icon": "$(file-media)"
 			},
@@ -117,39 +139,49 @@
 		"menus": {
 			"view/title": [
 				{
-					"command": "termicode.newSession",
+					"command": "termicode.newProviderSession",
 					"when": "view == termicode.terminal",
 					"group": "navigation@1"
 				},
 				{
-					"command": "termicode.addFile",
+					"command": "termicode.newSession",
 					"when": "view == termicode.terminal",
 					"group": "navigation@2"
 				},
 				{
-					"command": "termicode.addImage",
+					"command": "termicode.setDefaultProvider",
 					"when": "view == termicode.terminal",
 					"group": "navigation@3"
 				},
 				{
-					"command": "termicode.copyLastResponse",
+					"command": "termicode.addFile",
 					"when": "view == termicode.terminal",
 					"group": "navigation@4"
 				},
 				{
-					"command": "termicode.history",
+					"command": "termicode.addImage",
 					"when": "view == termicode.terminal",
 					"group": "navigation@5"
 				},
 				{
-					"command": "termicode.clearContext",
+					"command": "termicode.copyLastResponse",
 					"when": "view == termicode.terminal",
 					"group": "navigation@6"
 				},
 				{
-					"command": "termicode.compactContext",
+					"command": "termicode.history",
 					"when": "view == termicode.terminal",
 					"group": "navigation@7"
+				},
+				{
+					"command": "termicode.clearContext",
+					"when": "view == termicode.terminal",
+					"group": "navigation@8"
+				},
+				{
+					"command": "termicode.compactContext",
+					"when": "view == termicode.terminal",
+					"group": "navigation@9"
 				}
 			],
 			"editor/context": [
@@ -235,6 +267,34 @@
 					"type": "string",
 					"default": "",
 					"description": "Path to the Claude Code CLI executable (leave empty to auto-detect)"
+				},
+				"termicode.defaultProvider": {
+					"type": "string",
+					"default": "prompt",
+					"enum": ["prompt", "claude", "codex", "cursor", "gemini"],
+					"enumDescriptions": [
+						"Always ask which provider to use for each new session",
+						"Use Claude Code for new sessions by default",
+						"Use OpenAI Codex for new sessions by default",
+						"Use Cursor Agent for new sessions by default",
+						"Use Gemini CLI for new sessions by default"
+					],
+					"description": "Default provider to use when creating a new session"
+				},
+				"termicode.codexPath": {
+					"type": "string",
+					"default": "",
+					"description": "Path to the OpenAI Codex CLI executable (leave empty to auto-detect)"
+				},
+				"termicode.cursorAgentPath": {
+					"type": "string",
+					"default": "",
+					"description": "Path to the Cursor Agent CLI executable (leave empty to auto-detect)"
+				},
+				"termicode.geminiPath": {
+					"type": "string",
+					"default": "",
+					"description": "Path to the Gemini CLI executable (leave empty to auto-detect)"
 				}
 			}
 		}
