@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Termicode PTY bridge.
-Spawns claude in a real pseudo-terminal and bridges raw I/O through stdin/stdout.
-Usage: python3 pty_bridge.py <claude_path> <cols> <rows>
+Spawns a CLI agent in a real pseudo-terminal and bridges raw I/O through stdin/stdout.
+Usage: python3 pty_bridge.py <command_path> <cols> <rows>
 """
 import sys, os, pty, select, signal, struct, fcntl, termios
 
@@ -14,7 +14,7 @@ def set_winsize(fd, cols, rows):
         pass
 
 def main():
-    claude_path = sys.argv[1] if len(sys.argv) > 1 else 'claude'
+    command_path = sys.argv[1] if len(sys.argv) > 1 else 'claude'
     cols = int(sys.argv[2]) if len(sys.argv) > 2 else 120
     rows = int(sys.argv[3]) if len(sys.argv) > 3 else 40
     extra_args = sys.argv[4:] if len(sys.argv) > 4 else []
@@ -24,7 +24,7 @@ def main():
 
     pid = os.fork()
     if pid == 0:
-        # Child: become session leader, attach slave PTY, exec claude
+        # Child: become session leader, attach slave PTY, exec the agent CLI
         os.setsid()
         try:
             fcntl.ioctl(slave, termios.TIOCSCTTY, 1)
@@ -38,7 +38,7 @@ def main():
         env = dict(os.environ)
         env['TERM'] = 'xterm-256color'
         env['COLORTERM'] = 'truecolor'
-        os.execvpe(claude_path, [claude_path] + extra_args, env)
+        os.execvpe(command_path, [command_path] + extra_args, env)
         os._exit(1)
 
     # Parent: bridge stdin → PTY master and PTY master → stdout
@@ -97,7 +97,7 @@ def _process_input(master_fd, buf):
     Resize command format (sent by the extension): \x1b[8;<rows>;<cols>t
     """
     import re
-    # Try to consume resize sequences without forwarding them to claude
+    # Try to consume resize sequences without forwarding them to the agent CLI
     resize_re = re.compile(rb'\x1b\[8;(\d+);(\d+)t')
     out = b''
     while buf:

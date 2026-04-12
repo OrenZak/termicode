@@ -4,10 +4,18 @@ import * as crypto from 'crypto';
 import * as os from 'os';
 import * as path from 'path';
 import { execPromise } from './utils';
+import {
+	buildProviderNewSessionArgs,
+	buildProviderRestoreArgs,
+	getProvider,
+	isProviderId,
+	type ProviderId,
+} from './providers';
 
 export interface Session {
 	id: string;
-	claudeSessionId?: string;
+	providerId: ProviderId;
+	resumeToken?: string;
 	bridge?: cp.ChildProcess;
 	startupBuffer: string;
 	modelParsed: boolean;
@@ -22,6 +30,8 @@ export interface Session {
 interface SavedSessionData {
 	cwd: string;
 	label: string;
+	providerId?: ProviderId;
+	resumeToken?: string;
 	claudeSessionId?: string;
 	worktreePath?: string;
 }
@@ -56,13 +66,23 @@ export class SessionManager {
 
 	/** Called on 'ready': restores previous tabs or starts a fresh session. */
 	async initSessions(): Promise<void> {
+		if (this.sessions.size > 0) {
+			for (const session of this.sessions.values()) {
+				this.postSessionTab(session);
+			}
+			if (this._activeSessionId) {
+				this.postMessage({ type: 'activateTab', id: this._activeSessionId });
+			}
+			setTimeout(() => this.flushPending(120, 40), 600);
+			return;
+		}
+
 		const saved = this.context.workspaceState.get<SavedSessionData[]>(SAVED_SESSIONS_KEY);
 		if (saved && saved.length > 0) {
 			for (const data of saved) {
 				await this.restoreSession(data);
 			}
-		} else {
-			await this.newSession();
+			this.persistSessions();
 		}
 		// Fallback: if webview doesn't send a resize within 600ms, start with defaults
 		setTimeout(() => this.flushPending(120, 40), 600);
@@ -70,23 +90,25 @@ export class SessionManager {
 
 	private async restoreSession(data: SavedSessionData): Promise<void> {
 		const id = String(++this.sessionCounter);
+		const providerId = isProviderId(data.providerId) ? data.providerId : 'claude';
 		const session: Session = {
-			id, cwd: data.cwd, label: data.label,
+			id,
+			providerId,
+			cwd: data.cwd,
+			label: data.label,
 			startupBuffer: '', modelParsed: false, responseBuffer: '',
 			worktreePath: data.worktreePath,
-			claudeSessionId: data.claudeSessionId,
+			resumeToken: data.resumeToken ?? data.claudeSessionId,
 		};
 		this.sessions.set(id, session);
 		this._activeSessionId = id;
 
-		this.postMessage({ type: 'newTab', id, label: data.label, isWorktree: !!data.worktreePath });
-		const extraArgs = data.claudeSessionId
-			? ['--resume', data.claudeSessionId]
-			: ['--continue'];
+		this.postSessionTab(session);
+		const extraArgs = buildProviderRestoreArgs(providerId, session.resumeToken);
 		this.queueSession(session, extraArgs);
 	}
 
-	async newSession(): Promise<void> {
+	async newSession(providerId: ProviderId): Promise<void> {
 		const id = String(++this.sessionCounter);
 		const rootCwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
 		let cwd = rootCwd;
@@ -127,17 +149,21 @@ export class SessionManager {
 			worktreePath = wtPath;
 		}
 
-		const claudeSessionId = crypto.randomUUID();
+		const resumeToken = providerId === 'claude' ? crypto.randomUUID() : undefined;
 		const session: Session = {
-			id, cwd, label,
+			id,
+			providerId,
+			cwd,
+			label,
 			startupBuffer: '', modelParsed: false, responseBuffer: '',
-			worktreePath, claudeSessionId,
+			worktreePath,
+			resumeToken,
 		};
 		this.sessions.set(id, session);
 		this._activeSessionId = id;
 
-		this.postMessage({ type: 'newTab', id, label, isWorktree: !!worktreePath });
-		this.queueSession(session, ['--session-id', claudeSessionId]);
+		this.postSessionTab(session);
+		this.queueSession(session, buildProviderNewSessionArgs(providerId, resumeToken));
 		this.persistSessions();
 	}
 
@@ -152,7 +178,7 @@ export class SessionManager {
 			this.postMessage({ type: 'resetTab', id: s.id });
 			setTimeout(() => this.onSessionReady(s, []), 200);
 		} else {
-			this.newSession();
+			this.newSession('claude');
 		}
 	}
 
@@ -235,6 +261,13 @@ export class SessionManager {
 		this.persistSessions();
 	}
 
+	setResumeToken(id: string, resumeToken: string): void {
+		const s = this.sessions.get(id);
+		if (!s || s.resumeToken === resumeToken) { return; }
+		s.resumeToken = resumeToken;
+		this.persistSessions();
+	}
+
 	toggleWorktreeMode(): boolean {
 		this._worktreeMode = !this._worktreeMode;
 		return this._worktreeMode;
@@ -251,9 +284,23 @@ export class SessionManager {
 		const data: SavedSessionData[] = [...this.sessions.values()].map(s => ({
 			cwd: s.cwd,
 			label: s.label,
-			claudeSessionId: s.claudeSessionId,
+			providerId: s.providerId,
+			resumeToken: s.resumeToken,
 			worktreePath: s.worktreePath,
 		}));
 		this.context.workspaceState.update(SAVED_SESSIONS_KEY, data.length > 0 ? data : undefined);
+	}
+
+	private postSessionTab(session: Session): void {
+		const provider = getProvider(session.providerId);
+		this.postMessage({
+			type: 'newTab',
+			id: session.id,
+			label: session.label,
+			isWorktree: !!session.worktreePath,
+			providerId: session.providerId,
+			providerLabel: provider.shortLabel,
+			capabilities: provider.actionCommands,
+		});
 	}
 }

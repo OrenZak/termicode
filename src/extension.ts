@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
-import { ClaudeTerminalViewProvider } from './provider';
+import { TermicodeViewProvider } from './provider';
 
-let provider: ClaudeTerminalViewProvider | undefined;
+let provider: TermicodeViewProvider | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
-	provider = new ClaudeTerminalViewProvider(context);
+	provider = new TermicodeViewProvider(context);
 
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(
@@ -16,11 +16,29 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const reg = (id: string, fn: (...args: any[]) => any) =>
 		context.subscriptions.push(vscode.commands.registerCommand(id, fn));
+	const openAndFocus = () => {
+		vscode.commands.executeCommand('workbench.view.extension.termicode-claude');
+		provider?.focusTerminal();
+	};
 
 	reg('termicode.open', () =>
 		vscode.commands.executeCommand('workbench.view.extension.termicode-claude'));
 
-	reg('termicode.newSession', () => provider?.newSession());
+	reg('termicode.newSession', async () => {
+		const started = await provider?.newSession();
+		if (started) {
+			openAndFocus();
+		}
+	});
+
+	reg('termicode.newProviderSession', async () => {
+		const started = await provider?.newSessionWithPicker();
+		if (started) {
+			openAndFocus();
+		}
+	});
+
+	reg('termicode.setDefaultProvider', () => provider?.chooseDefaultProvider());
 
 	reg('termicode.addFile', (fileUri?: vscode.Uri) => {
 		const rel = provider?.getRelativePath(fileUri);
@@ -52,8 +70,9 @@ export function activate(context: vscode.ExtensionContext) {
 	reg('termicode.askClaude', async () => {
 		const editor = vscode.window.activeTextEditor;
 		const hasSelection = editor && !editor.selection.isEmpty;
+		const providerLabel = provider?.getActiveProviderLabel() ?? 'Agent';
 		const question = await vscode.window.showInputBox({
-			prompt: hasSelection ? 'Ask Claude about the selected code' : 'Ask Claude',
+			prompt: hasSelection ? `Ask ${providerLabel} about the selected code` : `Ask ${providerLabel}`,
 			placeHolder: 'What does this do? How can I improve it?',
 		});
 		if (!question) { return; }
@@ -75,7 +94,7 @@ export function activate(context: vscode.ExtensionContext) {
 		const uris = await vscode.window.showOpenDialog({
 			canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
 			filters: { 'Images': ['png', 'jpg', 'jpeg', 'gif', 'webp'] },
-			title: 'Select image to add to Claude',
+			title: 'Select image to add to the active agent',
 		});
 		if (uris?.[0]) {
 			provider?.injectText(`${uris[0].fsPath} `);
@@ -83,9 +102,9 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 
-	reg('termicode.clearContext',     () => provider?.injectText('/clear\r'));
-	reg('termicode.compactContext',   () => provider?.injectText('/compact\r'));
-	reg('termicode.history',          () => provider?.injectText('/resume\r'));
+	reg('termicode.clearContext',     () => provider?.runProviderAction('clear'));
+	reg('termicode.compactContext',   () => provider?.runProviderAction('compact'));
+	reg('termicode.history',          () => provider?.runProviderAction('history'));
 	reg('termicode.copyLastResponse', () => provider?.copyLastResponse());
 
 	reg('termicode.cmdL', () => {

@@ -16,6 +16,9 @@ export function stripAnsi(s: string): string {
 export function parseModelName(plain: string): string | null {
 	const patterns = [
 		/\b(claude-[a-z0-9-]+)/i,
+		/\b(gpt-[a-z0-9.-]+(?:-codex[a-z0-9.-]*)?)/i,
+		/\b(gemini-[a-z0-9.-]+)/i,
+		/\b(claude|cursor|gemini|gpt|codex|composer)[\s-]+([a-z0-9.:-]+[^\s,\r\n]*)/i,
 		/\b(sonnet|opus|haiku)[\s-]+([\d.]+[^\s,\r\n]*)/i,
 		/model[:\s]+([^\n\r,]{4,50})/i,
 	];

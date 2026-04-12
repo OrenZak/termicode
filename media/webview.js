@@ -34,7 +34,7 @@
 	}
 
 	// ── SESSION LIFECYCLE ──────────────────────────────────────────────────
-	function createSession(id, label, isWorktree) {
+	function createSession(id, label, isWorktree, providerLabel, capabilities) {
 		// DOM element
 		var el = document.createElement('div');
 		el.className = 'term-instance';
@@ -57,12 +57,12 @@
 
 		term.attachCustomKeyEventHandler(function (e) {
 			if (e.type === 'keydown' && e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
-				// Bracketed paste a newline — Claude Code has bracketed paste mode enabled,
+				// Bracketed paste a newline into the active agent without submitting.
 				// so \x1b[200~\n\x1b[201~ inserts a literal newline into the input without submitting.
 				if (id === activeId) { vscode.postMessage({ type: 'input', data: '\x1b[200~\n\x1b[201~' }); }
 				return false;
 			}
-			// Cmd+L (Mac) / Ctrl+L (Win/Linux): forward to VS Code instead of sending \x0c to Claude.
+			// Cmd+L (Mac) / Ctrl+L (Win/Linux): forward to VS Code instead of clearing the active CLI.
 			if (e.type === 'keydown' && e.key === 'l' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
 				vscode.postMessage({ type: 'command', command: 'termicode.cmdL' });
 				return false;
@@ -79,25 +79,30 @@
 		var session = {
 			id: id,
 			label: label,
+			providerLabel: providerLabel,
+			capabilities: capabilities || {},
 			term: term,
 			fitAddon: fitAddon,
 			el: el,
 			outputBuffer: '',
 			pendingApply: null,
 			codeBlockTimer: null,
+			modelName: '',
+			cwd: '',
+			running: false,
 		};
 		sessions[id] = session;
 
 		// Add tab button
-		addTab(id, label, isWorktree);
+		addTab(id, label, isWorktree, providerLabel);
 
 		return session;
 	}
 
 	// ── TAB BAR ────────────────────────────────────────────────────────────
-	function addTab(id, label, isWorktree) {
+	function addTab(id, label, isWorktree, providerLabel) {
 		var tabBar = document.getElementById('tab-bar');
-		var newTabBtn = document.getElementById('btn-new-tab');
+		var tabActions = document.getElementById('tab-actions');
 
 		var tab = document.createElement('button');
 		tab.className = 'session-tab' + (isWorktree ? ' worktree-tab' : '');
@@ -105,6 +110,10 @@
 
 		var dot = document.createElement('span');
 		dot.className = 'tab-dot';
+
+		var provider = document.createElement('span');
+		provider.className = 'tab-provider';
+		provider.textContent = providerLabel;
 
 		var lbl = document.createElement('span');
 		lbl.className = 'tab-label';
@@ -121,6 +130,7 @@
 		});
 
 		tab.appendChild(dot);
+		tab.appendChild(provider);
 		tab.appendChild(lbl);
 		tab.appendChild(cls);
 		tab.addEventListener('click', function () { activateSession(id); });
@@ -129,7 +139,7 @@
 			startRename(id);
 		});
 
-		tabBar.insertBefore(tab, newTabBtn);
+		tabBar.insertBefore(tab, tabActions);
 		activateSession(id);
 	}
 
@@ -210,6 +220,7 @@
 
 		// tell extension which session is active
 		vscode.postMessage({ type: 'switchTab', id: id });
+		renderActiveSession();
 	}
 
 	function destroySession(id) {
@@ -231,9 +242,15 @@
 			if (ids.length > 0) {
 				activateSession(ids[ids.length - 1]);
 			} else {
-				setStatus(false, '', '');
+				renderActiveSession();
 			}
 		}
+	}
+
+	function renderActiveSession() {
+		var session = activeId ? sessions[activeId] : null;
+		setStatus(session);
+		updateToolbarState(session);
 	}
 
 	// ── RESIZE OBSERVER ────────────────────────────────────────────────────
@@ -253,7 +270,7 @@
 		switch (msg.type) {
 
 			case 'newTab':
-				createSession(msg.id, msg.label, msg.isWorktree);
+				createSession(msg.id, msg.label, msg.isWorktree, msg.providerLabel, msg.capabilities);
 				break;
 
 			case 'worktreeMode':
@@ -277,8 +294,12 @@
 					session.term.reset();
 					session.outputBuffer = '';
 					session.pendingApply = null;
+					session.modelName = '';
+					session.cwd = '';
+					session.running = false;
 					hideApplyBar();
 				}
+				if (msg.id === activeId) { renderActiveSession(); }
 				break;
 
 			case 'write':
@@ -299,12 +320,12 @@
 
 			case 'sessionStarted':
 				if (session) {
+					session.running = true;
+					session.cwd = msg.cwd || '';
 					var tab = document.querySelector('.session-tab[data-id="' + msg.id + '"]');
 					if (tab) { tab.classList.add('running'); }
 				}
-				if (msg.id === activeId) {
-					setStatus(true, '', msg.cwd || '');
-				}
+				if (msg.id === activeId) { renderActiveSession(); }
 				break;
 
 			case 'version':
@@ -313,46 +334,64 @@
 
 			case 'modelName':
 				if (session) {
-					var tab2 = document.querySelector('.session-tab[data-id="' + msg.id + '"] .tab-label');
-					// optionally update tab label with short model
+					session.modelName = msg.name;
 				}
-				if (msg.id === activeId) {
-					document.getElementById('model-badge').textContent = msg.name;
-					document.getElementById('model-badge').classList.add('visible');
-					document.getElementById('status-model').textContent = msg.name;
-				}
+				if (msg.id === activeId) { renderActiveSession(); }
 				break;
 
 			case 'sessionEnded':
 				if (session) {
+					session.running = false;
 					var tab3 = document.querySelector('.session-tab[data-id="' + msg.id + '"]');
 					if (tab3) { tab3.classList.remove('running'); }
 				}
-				if (msg.id === activeId) {
-					document.getElementById('model-badge').classList.remove('visible');
-					setStatus(false, '', '');
-				}
+				if (msg.id === activeId) { renderActiveSession(); }
 				break;
 		}
 	});
 
 	// ── STATUS BAR ─────────────────────────────────────────────────────────
-	function setStatus(active, model, cwd) {
+	function setStatus(session) {
 		var dot   = document.getElementById('status-dot');
 		var label = document.getElementById('status-label');
+		var provider = document.getElementById('status-provider');
 		var sep   = document.getElementById('status-cwd-sep');
 		var cwdEl = document.getElementById('status-cwd');
-		if (active) {
+		if (session) {
 			dot.classList.add('active');
-			label.textContent = 'Active';
+			label.textContent = session.running ? 'Active' : 'Idle';
+			provider.textContent = session.providerLabel || '';
+			document.getElementById('status-model').textContent = session.modelName || '';
+			document.getElementById('model-badge').textContent = session.modelName || '';
+			document.getElementById('model-badge').classList.toggle('visible', !!session.modelName);
 		} else {
 			dot.classList.remove('active');
 			label.textContent = 'No session';
+			provider.textContent = '';
 			document.getElementById('status-model').textContent = '';
 			document.getElementById('model-badge').classList.remove('visible');
 		}
-		cwdEl.textContent = cwd || '';
-		sep.style.display = cwd ? '' : 'none';
+		cwdEl.textContent = session && session.cwd ? session.cwd : '';
+		sep.style.display = session && session.cwd ? '' : 'none';
+	}
+
+	function updateToolbarState(session) {
+		var buttons = {
+			'btn-clear': !!(session && session.capabilities && session.capabilities.clear),
+			'btn-compact': !!(session && session.capabilities && session.capabilities.compact),
+			'btn-history': !!(session && session.capabilities && session.capabilities.history),
+			'btn-addFile': !!session,
+			'btn-addImage': !!session,
+			'btn-copy': !!session,
+		};
+
+		Object.keys(buttons).forEach(function (id) {
+			var el = document.getElementById(id);
+			if (el) {
+				el.disabled = !buttons[id];
+				el.classList.toggle('disabled', !buttons[id]);
+			}
+		});
 	}
 
 	// ── ANSI / OUTPUT BUFFER ───────────────────────────────────────────────
@@ -406,7 +445,15 @@
 
 	// ── EVENT BINDINGS ─────────────────────────────────────────────────────
 	document.getElementById('btn-new-tab').addEventListener('click', function () {
+		vscode.postMessage({ type: 'command', command: 'termicode.newProviderSession' });
+	});
+
+	document.getElementById('btn-new-default-tab').addEventListener('click', function () {
 		vscode.postMessage({ type: 'command', command: 'termicode.newSession' });
+	});
+
+	document.getElementById('btn-set-default-provider').addEventListener('click', function () {
+		vscode.postMessage({ type: 'command', command: 'termicode.setDefaultProvider' });
 	});
 
 	// ── TOOLBAR BUTTONS ────────────────────────────────────────────────────
@@ -459,5 +506,6 @@
 	});
 
 	// ── BOOT ──────────────────────────────────────────────────────────────
+	updateToolbarState(null);
 	vscode.postMessage({ type: 'ready' });
 })();
