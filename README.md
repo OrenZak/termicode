@@ -1,28 +1,34 @@
 <div align="center">
   <img src="media/claude-icon.svg" width="100" />
-  <h1>Termicode – Claude Code Panel</h1>
-  <p>Run <a href="https://claude.ai/code">Claude Code</a> CLI as a first-class terminal panel inside VS Code's secondary sidebar.</p>
+  <h1>Termicode – AI Agent Panel</h1>
+  <p>Run AI coding agents like <a href="https://claude.ai/code">Claude Code</a>, OpenAI Codex, Cursor Agent, and Gemini CLI as a first-class terminal panel inside VS Code's secondary sidebar.</p>
 </div>
 
 ---
 
-No more alt-tabbing to a terminal. Termicode embeds a full Claude Code session next to your code, with multi-tab support, file/selection injection, and a real PTY so the terminal behaves exactly like your native terminal.
+No more alt-tabbing to a terminal. Termicode embeds full coding-agent sessions next to your code, with multi-tab support, provider selection per tab, file/selection injection, and a real PTY so the terminal behaves exactly like your native terminal.
 
 ---
 
 ## Features
 
-**Multi-session tabs** — run multiple independent Claude instances simultaneously, each in its own tab with a live status indicator.
+**Multi-provider tabs** — run Claude, Codex, Cursor Agent, and Gemini in separate tabs, with a visible provider badge and live status indicator on each one.
 
-**Selection → context** — press `Cmd+L` on selected code to inject it as a file reference (`@file:line-range`) into Claude's input. No text copied, Claude reads it directly.
+**Default provider** — set a favorite agent for the `+DEF` button and the new-session shortcut, while the plain `+` button always opens the provider picker for one-off sessions.
 
-**File & image injection** — add the current file, a selection, or an image to Claude's context with a single shortcut or toolbar button.
+**Selection → context** — press `Cmd+L` on selected code to inject it as a file reference (`@file:line-range`) into the active agent's input.
 
-**Worktree mode** — create a new git worktree per session so parallel Claude instances never interfere with each other.
+**File & image injection** — add the current file, a selection, or an image to the active agent's context with a single shortcut or toolbar button.
 
-**Session persistence** — sessions survive VS Code reloads; Claude restarts with `--continue` to pick up where it left off.
+**Provider-aware controls** — compact, clear, and history actions adapt to the active provider, and unsupported actions are disabled instead of sending the wrong command.
 
-**Plan preview** — when Claude writes a plan, it automatically opens in a Markdown preview panel.
+**Install on demand** — if you pick a provider that is missing, Termicode offers to install it before the session opens and ignores stale configured binary paths that no longer exist.
+
+**Worktree mode** — create a new git worktree per session so parallel agent instances never interfere with each other.
+
+**Session persistence** — tabs survive VS Code reloads. Providers with resumable CLI session IDs restore their conversations when possible; others reopen fresh tabs in the same working directory.
+
+**Plan preview** — when an agent writes a plan, it automatically opens in a Markdown preview panel.
 
 **Real PTY** — powered by a Python bridge that allocates a true pseudo-terminal, so colours, cursor movement, and interactive prompts all work correctly.
 
@@ -32,12 +38,12 @@ No more alt-tabbing to a terminal. Termicode embeds a full Claude Code session n
 
 | Shortcut | Action |
 |---|---|
-| `Cmd+L` | Add selected code to Claude (`@file:line`) · toggle panel when no selection |
+| `Cmd+L` | Add selected code to the active agent (`@file:line`) · toggle panel when no selection |
 | `Cmd+Escape` | Same as `Cmd+L` |
-| `Cmd+Shift+A` | Add current file to Claude |
-| `Cmd+Alt+N` | New Claude session (new tab) |
+| `Cmd+Shift+A` | Add current file to the active agent |
+| `Cmd+Alt+N` | New agent session using your default provider, or the picker if default is `Always Ask` |
 | `Cmd+Alt+C` | Open Termicode panel |
-| `Cmd+Alt+I` | Add image to Claude |
+| `Cmd+Alt+I` | Add image to the active agent |
 | `Cmd+Alt+H` | Session history (`/resume`) |
 | `Cmd+Alt+X` | Clear context (`/clear`) |
 | `Cmd+Alt+M` | Compact context (`/compact`) |
@@ -61,6 +67,7 @@ code --install-extension termicode-*.vsix
 ### Prerequisites
 
 - [Claude Code CLI](https://claude.ai/code) installed and on your `PATH`
+- OpenAI Codex CLI, Cursor Agent CLI, and/or Gemini CLI if you want to use those providers
 - Python 3 (ships with macOS / most Linux distros)
 - VS Code 1.90+
 
@@ -70,9 +77,15 @@ code --install-extension termicode-*.vsix
 
 | Setting | Default | Description |
 |---|---|---|
+| `termicode.defaultProvider` | `prompt` | Default provider for new sessions. Set this to `claude`, `codex`, `cursor`, or `gemini` to make the `+` button and `Cmd+Alt+N` open that provider directly |
 | `termicode.claudePath` | _(auto-detect)_ | Path to the `claude` executable — set this if `claude` isn't on your `PATH` |
+| `termicode.codexPath` | _(auto-detect)_ | Path to the `codex` executable |
+| `termicode.cursorAgentPath` | _(auto-detect)_ | Path to the `cursor-agent` executable |
+| `termicode.geminiPath` | _(auto-detect)_ | Path to the `gemini` executable |
 
-Auto-detection checks `~/.local/bin`, `~/.npm-global/bin`, `/usr/local/bin`, and `/opt/homebrew/bin`.
+Auto-detection checks common install locations in `~/.local/bin`, `~/.npm-global/bin`, `/usr/local/bin`, and `/opt/homebrew/bin` for each provider.
+
+Use `Termicode: Set Default Provider...` to update the default from the command palette or panel title bar, and `Termicode: New Session (Choose Provider)...` whenever you want to override it for a single tab.
 
 ---
 
