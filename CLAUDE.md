@@ -23,10 +23,13 @@ src/
   bridgeManager.ts  # spawns pty_bridge.py, wires stdout→webview / stdin←inject
   features.ts       # applyCode, copyLastResponse, plan preview helpers
   utils.ts          # getNonce, stripAnsi, parseModelName, execPromise
+  mcpAuthSetup.ts   # copies scripts/, merges hooks, installs launchd on activate
 media/
   pty_bridge.py     # Python PTY bridge — runs `claude` in a real pseudo-terminal
   webview.html      # HTML template ({{NONCE}}, {{XTERM_*}} placeholders)
   webview.js        # xterm.js wiring, tab bar, toolbar, drag-drop, key handlers
+scripts/
+  mcp-auth-check.sh # bundled shell scripts — copied to ~/.claude/scripts/ on activate
 ```
 
 Key data flow: `webview.js` ↔ `postMessage` ↔ `provider.ts` ↔ `sessionManager` / `bridgeManager` ↔ `pty_bridge.py` ↔ Claude CLI.
@@ -81,6 +84,12 @@ Key data flow: `webview.js` ↔ `postMessage` ↔ `provider.ts` ↔ `sessionMana
 ### Self-Improvement
 - After any correction, update `tasks/lessons.md` with the pattern to prevent recurrence.
 - Review lessons at session start.
+
+### Feature Distribution
+- Any feature that needs to be available to all extension users (scripts, hooks, agents, config) must be **bundled inside the extension** — not written to the user's home directory directly.
+- Place scripts in `scripts/`, other assets in `media/`.
+- Use `extension.ts` `activate()` + `src/mcpAuthSetup.ts` as the pattern: copy files to `~/.claude/`, merge settings, install system agents (launchd on macOS). Setup is **idempotent** — keyed on extension version in `globalState`.
+- Never write features that only work for one specific user or machine.
 
 ### Core Principles
 - **Simplicity first** — minimal code impact, no temporary fixes.
