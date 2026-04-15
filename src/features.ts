@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { stripAnsi } from './utils';
 
 export async function copyLastResponse(responseBuffer: string): Promise<void> {
@@ -33,7 +34,21 @@ export async function applyCodeToFile(filepath: string, code: string): Promise<v
 	}
 }
 
-export async function resolveDroppedImage(name: string, inject: (text: string) => void): Promise<void> {
+export async function resolveDroppedImage(name: string, inject: (text: string) => void, base64?: string, sessionCwd?: string): Promise<void> {
+	// If we have the file content, write it to a temp dir inside the session's cwd.
+	// This avoids Claude Code's read-permission prompts since the session already
+	// has implicit access to its working directory.
+	if (base64) {
+		const baseDir = sessionCwd ?? os.tmpdir();
+		const tmpDir = path.join(baseDir, '.termicode-images');
+		fs.mkdirSync(tmpDir, { recursive: true });
+		const tmpPath = path.join(tmpDir, name);
+		fs.writeFileSync(tmpPath, Buffer.from(base64, 'base64'));
+		inject(`${tmpPath} `);
+		return;
+	}
+
+	// Fallback: search workspace (for files dragged from the explorer)
 	const matches = await vscode.workspace.findFiles(`**/${name}`, undefined, 5);
 	if (matches.length === 1) {
 		inject(`${matches[0].fsPath} `);
