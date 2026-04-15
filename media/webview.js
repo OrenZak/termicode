@@ -324,6 +324,7 @@
 				}
 				break;
 
+
 			case 'modelName':
 				if (session) {
 					var tab2 = document.querySelector('.session-tab[data-id="' + msg.id + '"] .tab-label');
