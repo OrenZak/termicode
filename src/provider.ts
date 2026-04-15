@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { SessionManager } from './sessionManager';
 import { BridgeManager } from './bridgeManager';
@@ -47,6 +48,7 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 			switch (msg.type) {
 				case 'ready':
 					webviewView.webview.postMessage({ type: 'version', value: version });
+					this.sendMcpAuthWarning(webviewView.webview);
 					await this.sessionManager.initSessions();
 					break;
 				case 'input':
@@ -67,8 +69,11 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 				case 'applyCode':
 					await applyCodeToFile((msg as any).filepath, (msg as any).code);
 					break;
-				case 'dropImage':
-					await resolveDroppedImage((msg as any).name, (text) => this.injectText(text));
+				case 'dropImage': {
+					const sessionCwd = this.sessionManager.activeSession()?.cwd;
+					await resolveDroppedImage((msg as any).name, (text) => this.injectText(text), (msg as any).base64, sessionCwd);
+					break;
+				}
 					break;
 				case 'toggleWorktree': {
 					const enabled = this.sessionManager.toggleWorktreeMode();
@@ -110,6 +115,27 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 		if (!uri) { return undefined; }
 		const folder = vscode.workspace.getWorkspaceFolder(uri);
 		return folder ? path.relative(folder.uri.fsPath, uri.fsPath) : uri.fsPath;
+	}
+
+	private sendMcpAuthWarning(webview: vscode.Webview): void {
+		const statusFile = path.join(os.homedir(), '.claude', 'mcp-auth-status.json');
+		const logFile = path.join(os.homedir(), '.claude', 'logs', 'mcp-auth-check.log');
+		try {
+			if (!fs.existsSync(statusFile)) { return; }
+			const status = JSON.parse(fs.readFileSync(statusFile, 'utf8'));
+			const ageSeconds = Math.floor(Date.now() / 1000) - (status.timestamp ?? 0);
+			if (ageSeconds < 3600 && Array.isArray(status.needs_auth) && status.needs_auth.length > 0) {
+				// Include last 30 log lines for error context
+				let logTail = '';
+				try {
+					if (fs.existsSync(logFile)) {
+						const lines = fs.readFileSync(logFile, 'utf8').trimEnd().split('\n');
+						logTail = lines.slice(-30).join('\n');
+					}
+				} catch { /* non-fatal */ }
+				webview.postMessage({ type: 'mcpAuthWarning', servers: status.needs_auth, logTail });
+			}
+		} catch { /* non-fatal */ }
 	}
 
 	async copyLastResponse() {

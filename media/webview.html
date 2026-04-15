@@ -31,6 +31,34 @@
 			scrollbar-width: none;
 		}
 		#tab-bar::-webkit-scrollbar { display: none; }
+		#mcp-warn-bar {
+			display: none;
+			align-items: center;
+			gap: 8px;
+			padding: 0 10px;
+			height: 28px;
+			background: var(--vscode-inputValidation-warningBackground, #352a05);
+			border-bottom: 1px solid var(--vscode-inputValidation-warningBorder, #b89500);
+			font-size: 11px;
+			color: var(--vscode-inputValidation-warningForeground, #ffcc00);
+			flex-shrink: 0;
+			overflow: hidden;
+		}
+		#mcp-warn-bar.visible { display: flex; }
+		#mcp-warn-text { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+		#mcp-warn-fix {
+			flex-shrink: 0;
+			padding: 2px 8px;
+			border: 1px solid var(--vscode-inputValidation-warningBorder, #b89500);
+			border-radius: 3px;
+			background: transparent;
+			color: inherit;
+			font-size: 11px;
+			cursor: pointer;
+		}
+		#mcp-warn-fix:hover { background: rgba(255,255,255,0.1); }
+		#mcp-warn-dismiss { background: none; border: none; color: inherit; cursor: pointer; font-size: 13px; padding: 0 2px; opacity: 0.7; }
+		#mcp-warn-dismiss:hover { opacity: 1; }
 		#tab-version {
 			margin-left: auto;
 			padding: 0 10px;
@@ -288,6 +316,14 @@
 	<div id="tab-bar">
 		<button id="btn-new-tab" title="New Claude Session  ⌘⌥N">+</button>
 		<span id="tab-version"></span>
+	</div>
+
+	<!-- MCP auth warning bar -->
+	<div id="mcp-warn-bar">
+		<span>⚠</span>
+		<span id="mcp-warn-text"></span>
+		<button id="mcp-warn-fix">Fix with Claude</button>
+		<button id="mcp-warn-dismiss" title="Dismiss">✕</button>
 	</div>
 
 	<!-- Status bar -->

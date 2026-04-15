@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
 import { ClaudeTerminalViewProvider } from './provider';
+import { setupMcpAuthCheck } from './mcpAuthSetup';
 
 let provider: ClaudeTerminalViewProvider | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
+	setupMcpAuthCheck(context);
 	provider = new ClaudeTerminalViewProvider(context);
 
 	context.subscriptions.push(
@@ -71,7 +73,10 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.executeCommand('workbench.view.extension.termicode-claude');
 	});
 
-	reg('termicode.addImage', async () => {
+	reg('termicode.addImage', async (
+
+		
+	) => {
 		const uris = await vscode.window.showOpenDialog({
 			canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
 			filters: { 'Images': ['png', 'jpg', 'jpeg', 'gif', 'webp'] },

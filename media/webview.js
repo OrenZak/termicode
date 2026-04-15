@@ -311,6 +311,20 @@
 				document.getElementById('tab-version').textContent = 'v' + msg.value;
 				break;
 
+			case 'mcpAuthWarning':
+				var bar = document.getElementById('mcp-warn-bar');
+				var txt = document.getElementById('mcp-warn-text');
+				if (msg.servers && msg.servers.length > 0) {
+					var shown = msg.servers.slice(0, 3).join(', ');
+					var extra = msg.servers.length - 3;
+					txt.textContent = 'MCP re-auth needed: ' + shown + (extra > 0 ? ' (+' + extra + ' more)' : '');
+					bar.dataset.servers = JSON.stringify(msg.servers);
+					bar.dataset.logTail = msg.logTail || '';
+					bar.classList.add('visible');
+				}
+				break;
+
+
 			case 'modelName':
 				if (session) {
 					var tab2 = document.querySelector('.session-tab[data-id="' + msg.id + '"] .tab-label');
@@ -409,6 +423,23 @@
 		vscode.postMessage({ type: 'command', command: 'termicode.newSession' });
 	});
 
+	document.getElementById('mcp-warn-fix').addEventListener('click', function () {
+		var bar = document.getElementById('mcp-warn-bar');
+		bar.classList.remove('visible');
+		var servers = JSON.parse(bar.dataset.servers || '[]');
+		var logTail = bar.dataset.logTail || '';
+		var prompt = 'The following MCP servers need re-authentication: ' + servers.join(', ') + '.\n' +
+			'Please authenticate each one now using the available tools. Start with the ones you have authenticate tools for, then guide me through any remaining ones.\n';
+		if (logTail) {
+			prompt += '\nError log from the auth check script:\n```\n' + logTail + '\n```\n';
+		}
+		vscode.postMessage({ type: 'input', data: prompt + '\r' });
+	});
+
+	document.getElementById('mcp-warn-dismiss').addEventListener('click', function () {
+		document.getElementById('mcp-warn-bar').classList.remove('visible');
+	});
+
 	// ── TOOLBAR BUTTONS ────────────────────────────────────────────────────
 	var cmdMap = {
 		'btn-addFile':  'termicode.addFile',
@@ -453,9 +484,16 @@
 		dragCounter = 0;
 		overlay.classList.remove('visible');
 		var files = e.dataTransfer && e.dataTransfer.files;
-		if (files && files[0]) {
-			vscode.postMessage({ type: 'dropImage', name: files[0].name });
-		}
+		if (!files || !files[0]) { return; }
+		var file = files[0];
+		var reader = new FileReader();
+		reader.onload = function (ev) {
+			var dataUrl = ev.target.result;
+			// dataUrl is "data:<mime>;base64,<data>" — strip the prefix
+			var base64 = dataUrl.split(',')[1];
+			vscode.postMessage({ type: 'dropImage', name: file.name, base64: base64 });
+		};
+		reader.readAsDataURL(file);
 	});
 
 	// ── BOOT ──────────────────────────────────────────────────────────────
