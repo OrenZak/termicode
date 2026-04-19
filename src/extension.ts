@@ -100,9 +100,9 @@ export function activate(context: vscode.ExtensionContext) {
 			let output = '';
 			for await (const chunk of event.execution.read()) {
 				output += chunk;
+				if (output.length > 5000) { output = output.slice(-5000); }
+				provider?.setLastTerminalOutput(output.trim());
 			}
-			if (output.length > 5000) { output = output.slice(-5000); }
-			provider?.setLastTerminalOutput(output.trim());
 		})
 	);
 
