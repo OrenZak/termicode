@@ -65,8 +65,9 @@
 		term.attachCustomKeyEventHandler(function (e) {
 			if (e.type === 'keydown' && e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
 				// Bracketed paste a newline — Claude Code has bracketed paste mode enabled,
-				// so \x1b[200~\n\x1b[201~ inserts a literal newline into the input without submitting.
-				if (id === activeId) { vscode.postMessage({ type: 'input', data: '\x1b[200~\n\x1b[201~' }); }
+				// so \x1b[200~\r\x1b[201~ inserts a literal newline into the input without submitting.
+				// xterm.js normalises paste newlines to \r (CR), so readline expects \r, not \n.
+				if (id === activeId) { vscode.postMessage({ type: 'input', data: '\x1b[200~\r\x1b[201~' }); }
 				return false;
 			}
 			// Cmd+L (Mac) / Ctrl+L (Win/Linux): forward to VS Code instead of sending \x0c to Claude.
