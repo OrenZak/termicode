@@ -79,9 +79,22 @@
 		});
 
 		term.onData(function (data) {
-			if (id === activeId) {
-				vscode.postMessage({ type: 'input', data: data });
+			if (id !== activeId) { return; }
+
+			if (data === '\r') {
+				session.inputBuffer = '';
+			} else if (data === '\x7f') {
+				session.inputBuffer = session.inputBuffer.slice(0, -1);
+			} else if (data.length === 1 && data.charCodeAt(0) >= 32) {
+				session.inputBuffer += data;
+				if (session.inputBuffer.endsWith('@terminal ')) {
+					session.inputBuffer = session.inputBuffer.slice(0, -('@terminal '.length));
+					vscode.postMessage({ type: 'resolveTerminalTag' });
+					return;
+				}
 			}
+
+			vscode.postMessage({ type: 'input', data: data });
 		});
 
 		var session = {
@@ -91,6 +104,7 @@
 			fitAddon: fitAddon,
 			el: el,
 			outputBuffer: '',
+			inputBuffer: '',
 			pendingApply: null,
 			codeBlockTimer: null,
 		};
@@ -353,6 +367,17 @@
 				if (msg.id === activeId) {
 					document.getElementById('model-badge').classList.remove('visible');
 					setStatus(false, '', '');
+				}
+				break;
+
+			case 'terminalTagResolved':
+				if (msg.error) {
+					// No output available — forward the space we held back
+					vscode.postMessage({ type: 'input', data: ' ' });
+				} else {
+					// Delete the 9 chars of '@terminal' already in the PTY, then inject the file reference
+					var bs = new Array(10).join('\x7f');
+					vscode.postMessage({ type: 'input', data: bs + '@' + msg.path + ' ' });
 				}
 				break;
 		}
