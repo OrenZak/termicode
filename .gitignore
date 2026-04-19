@@ -2,3 +2,4 @@ node_modules/
 dist/
 *.vsix
 .yarn/
+.termicode-images/
