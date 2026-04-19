@@ -37,13 +37,36 @@ export class BridgeManager {
 
 		const cols = String(session.cols ?? 120);
 		const rows = String(session.rows ?? 40);
+		// Prepend scripts/ to PATH so our `open` interceptor takes precedence
+		const scriptsDir = path.join(this.context.extensionPath, 'scripts');
+		const envPath = `${scriptsDir}:${process.env.PATH ?? ''}`;
 		session.bridge = cp.spawn('python3', [bridgePath, claudePath, cols, rows, ...extraArgs], {
 			cwd: session.cwd,
-			env: { ...process.env },
+			env: { ...process.env, PATH: envPath },
 		});
 
+		const openedUrls = new Set<string>();
+		let modelReadyAt: number | null = null;
+		let urlScanBuffer = '';
+
 		session.bridge.stdout?.on('data', (chunk: Buffer) => {
-			const text = chunk.toString('utf8');
+			let text = chunk.toString('utf8');
+
+			// Detect claude.ai/code session URLs printed inline by ultraplan/web commands.
+			// Use a rolling buffer to handle URLs split across multiple PTY chunks.
+			// Wait 5s after model is ready to let history replay finish before acting.
+			if (modelReadyAt && (Date.now() - modelReadyAt) > 5000) {
+				urlScanBuffer = (urlScanBuffer + stripAnsi(text)).slice(-512);
+				const sessionUrlMatch = urlScanBuffer.match(/https:\/\/claude\.ai\/code\/session_\w+/);
+				if (sessionUrlMatch) {
+					const url = sessionUrlMatch[0];
+					if (!openedUrls.has(url)) {
+						openedUrls.add(url);
+						urlScanBuffer = '';
+						vscode.env.openExternal(vscode.Uri.parse(url));
+					}
+				}
+			}
 
 			// If --continue/--resume fails, restart as a fresh session
 			const plain = stripAnsi(text);
@@ -68,10 +91,11 @@ export class BridgeManager {
 
 			if (!session.modelParsed) {
 				session.startupBuffer += stripAnsi(text);
-				if (session.startupBuffer.length > 4096) { session.modelParsed = true; }
+				if (session.startupBuffer.length > 4096) { session.modelParsed = true; modelReadyAt = Date.now(); }
 				const name = parseModelName(session.startupBuffer);
 				if (name) {
 					session.modelParsed = true;
+					modelReadyAt = Date.now();
 					this.postMessage({ type: 'modelName', id: session.id, name });
 				}
 			}

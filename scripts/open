@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Pass through to the real open — URL detection is handled by Termicode's
+# inline text scanner in bridgeManager.ts (session_\w+ pattern).
+/usr/bin/open "$@"
