@@ -77,6 +77,8 @@ export function activate(context: vscode.ExtensionContext) {
 
 		
 	) => {
+
+
 		const uris = await vscode.window.showOpenDialog({
 			canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
 			filters: { 'Images': ['png', 'jpg', 'jpeg', 'gif', 'webp'] },
@@ -92,6 +94,17 @@ export function activate(context: vscode.ExtensionContext) {
 	reg('termicode.compactContext',   () => provider?.injectText('/compact\r'));
 	reg('termicode.history',          () => provider?.injectText('/resume\r'));
 	reg('termicode.copyLastResponse', () => provider?.copyLastResponse());
+
+	context.subscriptions.push(
+		vscode.window.onDidStartTerminalShellExecution(async event => {
+			let output = '';
+			for await (const chunk of event.execution.read()) {
+				output += chunk;
+			}
+			if (output.length > 5000) { output = output.slice(-5000); }
+			provider?.setLastTerminalOutput(output.trim());
+		})
+	);
 
 	reg('termicode.cmdL', () => {
 		const editor = vscode.window.activeTextEditor
