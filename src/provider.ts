@@ -17,13 +17,16 @@ type WebviewMessage =
 	| { type: 'applyCode'; filepath: string; code: string }
 	| { type: 'dropImage'; name: string }
 	| { type: 'toggleWorktree' }
-	| { type: 'renameTab'; id: string; label: string };
+	| { type: 'renameTab'; id: string; label: string }
+	| { type: 'openExternal'; url: string }
+	| { type: 'resolveTerminalTag' };
 
 export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 
 	private view?: vscode.WebviewView;
 	private sessionManager: SessionManager;
 	private bridgeManager: BridgeManager;
+	private lastTerminalOutput = '';
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 		const postMessage = (msg: any) => this.view?.webview.postMessage(msg);
@@ -83,6 +86,25 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 				case 'renameTab':
 					this.sessionManager.renameSession(msg.id, msg.label);
 					break;
+				case 'openExternal': {
+					const url = msg.url;
+					// Validate scheme before opening — only http/https allowed
+					if (/^https?:\/\//i.test(url)) {
+						vscode.env.openExternal(vscode.Uri.parse(url));
+					}
+					break;
+				}
+				case 'resolveTerminalTag': {
+					if (!this.lastTerminalOutput) {
+						webviewView.webview.postMessage({ type: 'terminalTagResolved', error: true });
+						vscode.window.showWarningMessage('Termicode: No terminal output captured yet. Run a command in a VS Code terminal first.');
+						break;
+					}
+					const tmpPath = path.join(os.tmpdir(), 'termicode_terminal.txt');
+					fs.writeFileSync(tmpPath, this.lastTerminalOutput, 'utf8');
+					webviewView.webview.postMessage({ type: 'terminalTagResolved', path: tmpPath });
+					break;
+				}
 			}
 		});
 
@@ -109,6 +131,8 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 		}
 		s.bridge.stdin.write(text);
 	}
+
+	setLastTerminalOutput(text: string) { this.lastTerminalOutput = text; }
 
 	getRelativePath(fileUri?: vscode.Uri): string | undefined {
 		const uri = fileUri ?? vscode.window.activeTextEditor?.document.uri;
@@ -160,6 +184,7 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 			.replace('{{XTERM_CSS}}', uri('xterm.css'))
 			.replace('{{XTERM_JS}}', uri('xterm.js'))
 			.replace('{{FIT_ADDON_JS}}', uri('xterm-addon-fit.js'))
+			.replace('{{WEB_LINKS_ADDON_JS}}', uri('xterm-addon-web-links.js'))
 			.replace('{{WEBVIEW_JS}}', uri('webview.js'));
 	}
 }

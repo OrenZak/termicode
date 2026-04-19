@@ -52,6 +52,13 @@
 		});
 		var fitAddon = new FitAddon.FitAddon();
 		term.loadAddon(fitAddon);
+
+		// WebLinksAddon — makes URLs clickable; handler validated in extension host
+		var webLinksAddon = new WebLinksAddon.WebLinksAddon(function (e, url) {
+			vscode.postMessage({ type: 'openExternal', url: url });
+		});
+		term.loadAddon(webLinksAddon);
+
 		term.open(el);
 		fitAddon.fit();
 
