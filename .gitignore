@@ -3,3 +3,4 @@ dist/
 *.vsix
 .yarn/
 .termicode-images/
+src/termicode.code-workspace
