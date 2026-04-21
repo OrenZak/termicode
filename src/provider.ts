@@ -100,19 +100,39 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 					this.log.appendLine(`[resolveTerminalTag] open terminals: ${vscode.window.terminals.length}, active: ${vscode.window.activeTerminal?.name ?? 'none'}`);
 					this.log.appendLine(`[resolveTerminalTag] active terminal shell integration: ${vscode.window.activeTerminal?.shellIntegration ? 'yes' : 'no'}`);
 					if (!this.lastTerminalOutput) {
-						// Fallback: capture via clipboard from the active VS Code terminal
 						try {
 							const prev = await vscode.env.clipboard.readText();
-							this.log.appendLine('[resolveTerminalTag] trying copyLastCommandOutput fallback');
+							const sentinel = `__termicode_${Date.now()}__`;
+							let captured = '';
+
+							// Try 1: copyLastCommandOutput (completed commands with shell integration)
+							await vscode.env.clipboard.writeText(sentinel);
 							await vscode.commands.executeCommand('workbench.action.terminal.copyLastCommandOutput');
-							const captured = (await vscode.env.clipboard.readText()).trim();
-							await vscode.env.clipboard.writeText(prev);
-							this.log.appendLine(`[resolveTerminalTag] clipboard captured ${captured.length} chars (prev was ${prev.length} chars)`);
-							if (captured && captured !== prev.trim()) {
-								this.lastTerminalOutput = captured.length > 5000 ? captured.slice(-5000) : captured;
-								this.log.appendLine('[resolveTerminalTag] fallback succeeded');
+							const clip1 = (await vscode.env.clipboard.readText()).trim();
+							if (clip1 && clip1 !== sentinel) {
+								captured = clip1;
+								this.log.appendLine(`[resolveTerminalTag] copyLastCommandOutput succeeded: ${captured.length} chars`);
 							} else {
-								this.log.appendLine('[resolveTerminalTag] clipboard unchanged — fallback got nothing new');
+								this.log.appendLine('[resolveTerminalTag] copyLastCommandOutput unchanged, trying selectAll');
+							}
+
+							// Try 2: selectAll + copySelection (works for running processes)
+							if (!captured) {
+								await vscode.env.clipboard.writeText(sentinel);
+								await vscode.commands.executeCommand('workbench.action.terminal.selectAll');
+								await vscode.commands.executeCommand('workbench.action.terminal.copySelection');
+								const clip2 = (await vscode.env.clipboard.readText()).trim();
+								if (clip2 && clip2 !== sentinel) {
+									captured = clip2;
+									this.log.appendLine(`[resolveTerminalTag] selectAll succeeded: ${captured.length} chars`);
+								} else {
+									this.log.appendLine('[resolveTerminalTag] selectAll also unchanged');
+								}
+							}
+
+							await vscode.env.clipboard.writeText(prev);
+							if (captured) {
+								this.lastTerminalOutput = captured.length > 5000 ? captured.slice(-5000) : captured;
 							}
 						} catch (err) {
 							this.log.appendLine(`[resolveTerminalTag] fallback error: ${err}`);
