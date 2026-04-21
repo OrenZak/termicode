@@ -70,6 +70,22 @@
 				}
 				return false;
 			}
+			// Cmd+Z / Cmd+Shift+Z (Mac) and Ctrl+Z / Ctrl+Y (Windows): undo/redo in Claude's input
+			if (e.type === 'keydown' && e.key === 'z' && (e.metaKey || e.ctrlKey) && !e.altKey) {
+				e.preventDefault();
+				if (id === activeId) {
+					vscode.postMessage({ type: 'input', data: e.shiftKey ? '\x1b\x1f' : '\x1f' });
+				}
+				return false;
+			}
+			// Ctrl+Y: redo (Windows convention)
+			if (e.type === 'keydown' && e.key === 'y' && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+				e.preventDefault();
+				if (id === activeId) {
+					vscode.postMessage({ type: 'input', data: '\x1b\x1f' });
+				}
+				return false;
+			}
 			// Cmd+L (Mac) / Ctrl+L (Win/Linux): forward to VS Code instead of sending \x0c to Claude.
 			if (e.type === 'keydown' && e.key === 'l' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
 				e.preventDefault();
