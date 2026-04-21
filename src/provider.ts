@@ -96,6 +96,18 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 				}
 				case 'resolveTerminalTag': {
 					if (!this.lastTerminalOutput) {
+						// Fallback: capture via clipboard from the active VS Code terminal
+						try {
+							const prev = await vscode.env.clipboard.readText();
+							await vscode.commands.executeCommand('workbench.action.terminal.copyLastCommandOutput');
+							const captured = (await vscode.env.clipboard.readText()).trim();
+							await vscode.env.clipboard.writeText(prev);
+							if (captured && captured !== prev.trim()) {
+								this.lastTerminalOutput = captured.length > 5000 ? captured.slice(-5000) : captured;
+							}
+						} catch { /* ignore, will show error below */ }
+					}
+					if (!this.lastTerminalOutput) {
 						webviewView.webview.postMessage({ type: 'terminalTagResolved', error: true });
 						vscode.window.showWarningMessage('Termicode: No terminal output captured yet. Run a command in a VS Code terminal first.');
 						break;
