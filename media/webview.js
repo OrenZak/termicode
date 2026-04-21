@@ -63,14 +63,16 @@
 		fitAddon.fit();
 
 		term.attachCustomKeyEventHandler(function (e) {
-			if (e.type === 'keydown' && e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
-				// Bracketed paste a newline — Claude Code has bracketed paste mode enabled,
-				// so \x1b[200~\n\x1b[201~ inserts a literal newline into the input without submitting.
-				if (id === activeId) { vscode.postMessage({ type: 'input', data: '\x1b[200~\n\x1b[201~' }); }
+			if (e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+				e.preventDefault();
+				if (e.type === 'keydown' && id === activeId) {
+					vscode.postMessage({ type: 'input', data: '\x1b[200~\n\x1b[201~' });
+				}
 				return false;
 			}
 			// Cmd+L (Mac) / Ctrl+L (Win/Linux): forward to VS Code instead of sending \x0c to Claude.
 			if (e.type === 'keydown' && e.key === 'l' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+				e.preventDefault();
 				vscode.postMessage({ type: 'command', command: 'termicode.cmdL' });
 				return false;
 			}
