@@ -97,14 +97,12 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		vscode.window.onDidStartTerminalShellExecution(async event => {
-			provider?.logLine(`[shellExec] started in terminal: "${event.terminal.name}"`);
 			let output = '';
 			for await (const chunk of event.execution.read()) {
 				output += chunk;
 				if (output.length > 5000) { output = output.slice(-5000); }
 				provider?.setLastTerminalOutput(output.trim());
 			}
-			provider?.logLine(`[shellExec] done, captured ${output.length} chars`);
 		})
 	);
 

@@ -1,8 +1,11 @@
 **/.git/**
 **/node_modules/**
 src/**
+test/**
+vitest.config.js
 *.ts
 *.map
 tsconfig.json
 esbuild.mjs
+vitest.config.js
 .vscodeignore

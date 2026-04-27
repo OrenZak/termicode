@@ -63,55 +63,13 @@
 		fitAddon.fit();
 
 		term.attachCustomKeyEventHandler(function (e) {
-			if (e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
-				e.preventDefault();
-				if (e.type === 'keydown' && id === activeId) {
-					vscode.postMessage({ type: 'input', data: '\x1b[200~\n\x1b[201~' });
-				}
-				return false;
-			}
-			// Cmd+Z / Cmd+Shift+Z (Mac) and Ctrl+Z / Ctrl+Y (Windows): undo/redo in Claude's input
-			if (e.type === 'keydown' && e.key === 'z' && (e.metaKey || e.ctrlKey) && !e.altKey) {
-				e.preventDefault();
-				if (id === activeId) {
-					vscode.postMessage({ type: 'input', data: e.shiftKey ? '\x1b\x1f' : '\x1f' });
-				}
-				return false;
-			}
-			// Ctrl+Y: redo (Windows convention)
-			if (e.type === 'keydown' && e.key === 'y' && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-				e.preventDefault();
-				if (id === activeId) {
-					vscode.postMessage({ type: 'input', data: '\x1b\x1f' });
-				}
-				return false;
-			}
-			// Cmd+L (Mac) / Ctrl+L (Win/Linux): forward to VS Code instead of sending \x0c to Claude.
-			if (e.type === 'keydown' && e.key === 'l' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
-				e.preventDefault();
-				vscode.postMessage({ type: 'command', command: 'termicode.cmdL' });
-				return false;
-			}
-			return true;
+			return TermicodeHandlers.handleKeyEvent(e, id === activeId, function (msg) { vscode.postMessage(msg); });
 		});
 
 		term.onData(function (data) {
 			if (id !== activeId) { return; }
-
-			if (data === '\r') {
-				session.inputBuffer = '';
-			} else if (data === '\x7f') {
-				session.inputBuffer = session.inputBuffer.slice(0, -1);
-			} else if (data.length === 1 && data.charCodeAt(0) >= 32) {
-				session.inputBuffer += data;
-				if (session.inputBuffer.endsWith('@terminal ')) {
-					session.inputBuffer = session.inputBuffer.slice(0, -('@terminal '.length));
-					vscode.postMessage({ type: 'resolveTerminalTag' });
-					return;
-				}
-			}
-
-			vscode.postMessage({ type: 'input', data: data });
+			var consumed = TermicodeHandlers.handleTerminalData(data, session, function (msg) { vscode.postMessage(msg); });
+			if (!consumed) { vscode.postMessage({ type: 'input', data: data }); }
 		});
 
 		var session = {
@@ -122,6 +80,7 @@
 			el: el,
 			outputBuffer: '',
 			inputBuffer: '',
+			terminalTagPath: null,
 			pendingApply: null,
 			codeBlockTimer: null,
 		};
@@ -388,14 +347,11 @@
 				break;
 
 			case 'terminalTagResolved':
-				if (msg.error) {
-					// No output available — forward the space we held back
-					vscode.postMessage({ type: 'input', data: ' ' });
-				} else {
-					// Delete the 9 chars of '@terminal' already in the PTY, then inject the file reference
-					var bs = new Array(10).join('\x7f');
-					vscode.postMessage({ type: 'input', data: bs + '@' + msg.path + ' ' });
+				if (!msg.error && activeId && sessions[activeId]) {
+					sessions[activeId].terminalTagPath = msg.path;
 				}
+				// Restore focus after clipboard/selectAll commands stole it
+				if (activeId && sessions[activeId]) { sessions[activeId].term.focus(); }
 				break;
 		}
 	});

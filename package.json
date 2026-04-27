@@ -242,6 +242,7 @@
 	"scripts": {
 		"build": "node esbuild.mjs",
 		"watch": "node esbuild.mjs --watch",
+		"test": "node --test --experimental-test-coverage test/handlers.test.mjs",
 		"package": "yarn build && vsce package",
 		"vscode:prepublish": "yarn build"
 	},

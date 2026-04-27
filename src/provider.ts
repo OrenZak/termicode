@@ -27,7 +27,6 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 	private sessionManager: SessionManager;
 	private bridgeManager: BridgeManager;
 	private lastTerminalOutput = '';
-	private readonly log = vscode.window.createOutputChannel('Termicode');
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 		const postMessage = (msg: any) => this.view?.webview.postMessage(msg);
@@ -96,9 +95,6 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 					break;
 				}
 				case 'resolveTerminalTag': {
-					this.log.appendLine(`[resolveTerminalTag] cached output length: ${this.lastTerminalOutput.length}`);
-					this.log.appendLine(`[resolveTerminalTag] open terminals: ${vscode.window.terminals.length}, active: ${vscode.window.activeTerminal?.name ?? 'none'}`);
-					this.log.appendLine(`[resolveTerminalTag] active terminal shell integration: ${vscode.window.activeTerminal?.shellIntegration ? 'yes' : 'no'}`);
 					if (!this.lastTerminalOutput) {
 						try {
 							const prev = await vscode.env.clipboard.readText();
@@ -109,12 +105,7 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 							await vscode.env.clipboard.writeText(sentinel);
 							await vscode.commands.executeCommand('workbench.action.terminal.copyLastCommandOutput');
 							const clip1 = (await vscode.env.clipboard.readText()).trim();
-							if (clip1 && clip1 !== sentinel) {
-								captured = clip1;
-								this.log.appendLine(`[resolveTerminalTag] copyLastCommandOutput succeeded: ${captured.length} chars`);
-							} else {
-								this.log.appendLine('[resolveTerminalTag] copyLastCommandOutput unchanged, trying selectAll');
-							}
+							if (clip1 && clip1 !== sentinel) { captured = clip1; }
 
 							// Try 2: selectAll + copySelection (works for running processes)
 							if (!captured) {
@@ -122,32 +113,22 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 								await vscode.commands.executeCommand('workbench.action.terminal.selectAll');
 								await vscode.commands.executeCommand('workbench.action.terminal.copySelection');
 								const clip2 = (await vscode.env.clipboard.readText()).trim();
-								if (clip2 && clip2 !== sentinel) {
-									captured = clip2;
-									this.log.appendLine(`[resolveTerminalTag] selectAll succeeded: ${captured.length} chars`);
-								} else {
-									this.log.appendLine('[resolveTerminalTag] selectAll also unchanged');
-								}
+								if (clip2 && clip2 !== sentinel) { captured = clip2; }
 							}
 
 							await vscode.env.clipboard.writeText(prev);
 							if (captured) {
 								this.lastTerminalOutput = captured.length > 5000 ? captured.slice(-5000) : captured;
 							}
-						} catch (err) {
-							this.log.appendLine(`[resolveTerminalTag] fallback error: ${err}`);
-						}
+						} catch { /* non-fatal */ }
 					}
 					if (!this.lastTerminalOutput) {
-						this.log.appendLine('[resolveTerminalTag] no output — sending error to webview');
-						this.log.show(true);
 						webviewView.webview.postMessage({ type: 'terminalTagResolved', error: true });
 						vscode.window.showWarningMessage('Termicode: No terminal output captured yet. Run a command in a VS Code terminal first.');
 						break;
 					}
 					const tmpPath = path.join(os.tmpdir(), 'termicode_terminal.txt');
 					fs.writeFileSync(tmpPath, this.lastTerminalOutput, 'utf8');
-					this.log.appendLine(`[resolveTerminalTag] success — wrote ${this.lastTerminalOutput.length} chars to ${tmpPath}`);
 					webviewView.webview.postMessage({ type: 'terminalTagResolved', path: tmpPath });
 					break;
 				}
@@ -179,7 +160,6 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 	}
 
 	setLastTerminalOutput(text: string) { this.lastTerminalOutput = text; }
-	logLine(msg: string) { this.log.appendLine(msg); }
 
 	getRelativePath(fileUri?: vscode.Uri): string | undefined {
 		const uri = fileUri ?? vscode.window.activeTextEditor?.document.uri;
@@ -232,6 +212,7 @@ export class ClaudeTerminalViewProvider implements vscode.WebviewViewProvider {
 			.replace('{{XTERM_JS}}', uri('xterm.js'))
 			.replace('{{FIT_ADDON_JS}}', uri('xterm-addon-fit.js'))
 			.replace('{{WEB_LINKS_ADDON_JS}}', uri('xterm-addon-web-links.js'))
+			.replace('{{HANDLERS_JS}}', uri('handlers.js'))
 			.replace('{{WEBVIEW_JS}}', uri('webview.js'));
 	}
 }
