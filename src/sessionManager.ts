@@ -109,7 +109,7 @@ export class SessionManager {
 			if (!branch) { return; }
 
 			const safeBranch = branch.trim().replace(/[^a-zA-Z0-9_\-\/]/g, '-');
-			const wtPath = path.join(os.tmpdir(), 'termicode-wt', safeBranch.replace(/\//g, '-'));
+			const wtPath = path.join(path.dirname(rootCwd), `${path.basename(rootCwd)}-${safeBranch.replace(/\//g, '-')}`);
 
 			try {
 				await execPromise(`git worktree add "${wtPath}" -b "${safeBranch}"`, rootCwd);
@@ -125,6 +125,12 @@ export class SessionManager {
 			cwd = wtPath;
 			label = safeBranch.split('/').pop() ?? safeBranch;
 			worktreePath = wtPath;
+
+			// Add worktree folder to VS Code workspace so Source Control detects it
+			vscode.workspace.updateWorkspaceFolders(
+				vscode.workspace.workspaceFolders?.length ?? 0, 0,
+				{ uri: vscode.Uri.file(wtPath), name: label }
+			);
 		}
 
 		const claudeSessionId = crypto.randomUUID();
@@ -172,6 +178,11 @@ export class SessionManager {
 		}
 
 		if (s.worktreePath) {
+			// Remove worktree folder from VS Code workspace
+			const folders = vscode.workspace.workspaceFolders ?? [];
+			const idx = folders.findIndex(f => f.uri.fsPath === s.worktreePath);
+			if (idx !== -1) { vscode.workspace.updateWorkspaceFolders(idx, 1); }
+
 			const rootCwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? os.homedir();
 			const answer = await vscode.window.showInformationMessage(
 				`Remove worktree "${s.label}"?`,
