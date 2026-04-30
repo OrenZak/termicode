@@ -14,6 +14,9 @@ const HOOK_MARKER = 'mcp-auth-check.sh';
  * Idempotent: only re-runs when the extension version changes.
  */
 export async function setupMcpAuthCheck(context: vscode.ExtensionContext): Promise<void> {
+	// Always run — resets on reboot so must re-apply every activation
+	if (process.platform === 'darwin') { ensureNodeInMacOSPath(); }
+
 	const version = context.extension.packageJSON.version as string;
 	if (context.globalState.get<string>(SETUP_VERSION_KEY) === version) { return; }
 
@@ -69,6 +72,28 @@ function mergeHook(scriptPath: string): void {
 	const tmp = settingsPath + '.tmp';
 	fs.writeFileSync(tmp, JSON.stringify(settings, null, 2));
 	fs.renameSync(tmp, settingsPath);
+}
+
+function ensureNodeInMacOSPath(): void {
+	try {
+		// Resolve node binary dir by sourcing nvm in a bash subshell
+		const nodeBin = cp.execSync(
+			'export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; dirname "$(which node)"',
+			{ shell: '/bin/bash', encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }
+		).trim();
+
+		if (!nodeBin || !fs.existsSync(nodeBin)) { return; }
+
+		// Check the current macOS GUI environment PATH
+		const currentPath = cp.execSync('launchctl getenv PATH', {
+			encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'],
+		}).trim();
+
+		if (currentPath.includes(nodeBin)) { return; }
+
+		const newPath = `${nodeBin}:${currentPath || '/usr/local/bin:/usr/bin:/bin'}`;
+		cp.execSync(`launchctl setenv PATH "${newPath}"`, { stdio: 'ignore' });
+	} catch { /* non-fatal */ }
 }
 
 function installLaunchd(scriptPath: string): void {
